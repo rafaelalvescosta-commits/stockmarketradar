@@ -18,7 +18,7 @@ A parte numérica (gatilhos, níveis, resultados, estatísticas) é do código. 
 W=<scratchpad>/radar && mkdir -p $W
 [ -d /home/user/stockmarketradar ] || git clone --depth 1 https://github.com/rafaelalvescosta-commits/stockmarketradar /home/user/stockmarketradar
 cd /home/user/stockmarketradar && git pull --ff-only -q || true
-pip install -q -r requirements.txt
+python -m pip install -q -r requirements.txt   # "python -m pip" garante o mesmo Python que roda o scanner
 ```
 
 Carregue a ferramenta do banco: ToolSearch `select:ArtifactData`.

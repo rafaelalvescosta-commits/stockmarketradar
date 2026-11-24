@@ -77,7 +77,7 @@ def test_technical_score_rules():
     assert score == 50 + 15 + 10 + 5 and any("correção" in n for n in notes)
     score, notes = ds.technical_score({**base, "close_in_range": 0.05, "volume_ratio": 4, "gap_pct": -5})
     assert score == 50 - 10 - 8 - 5
-    # RSI < 25 e posição face à MM200 já não pontuam (efeito instável no backtest)
+    # RSI < 25 e posição vs MM200 já não pontuam (efeito instável no backtest)
     assert ds.technical_score({**base, "rsi14": 20, "dist_sma200": 10})[0] == 50
     assert ds.technical_score(base, {"spy_d200": 2.0})[0] == 50
 
@@ -145,21 +145,6 @@ def test_market_regime_below_sma200():
 # --------------------------------------------------------------------------
 # Bugs: pregão repetido, sinais repetidos, barras desatualizadas
 # --------------------------------------------------------------------------
-
-def test_rerun_same_session_without_signals_is_skipped(tmp_path, monkeypatch):
-    """Feriado depois de um dia sem sinais: não reprocessa nem renotifica."""
-    frames = _bench_frames({"BBB": _frame(seed=3)})
-    monkeypatch.setattr(ds, "fetch_history", lambda tickers, period="1y": frames)
-    calls = []
-    real_render = ds.render_html
-    monkeypatch.setattr(ds, "render_html", lambda *a, **k: (calls.append(1), real_render(*a, **k))[1])
-    cfg = ds.DipScanConfig(universe={"BBB": ("Beta", "QQQ")}, output_dir=tmp_path)
-    assert ds.run(cfg, dry_run=True) == 0
-    assert ds.run(cfg, dry_run=True) == 0
-    assert len(calls) == 1
-    assert ds.run(cfg, dry_run=True, force=True) == 0
-    assert len(calls) == 2
-
 
 def test_cooldown_skips_recent_signal_of_same_ticker():
     df = _frame(drop_pct=8, vol_mult=3)
@@ -249,47 +234,6 @@ def test_earnings_unknown_when_fetch_fails():
 # LLM
 # --------------------------------------------------------------------------
 
-def test_extract_json_handles_fences():
-    raw = '```json\n{"cause_type": "pontual", "verdict": "entrar"}\n```'
-    assert ds._extract_json(raw) == {"cause_type": "pontual", "verdict": "entrar"}
-    assert ds._extract_json("sem json") is None
-
-
-def test_classify_falls_back_when_llm_returns_garbage():
-    class Fake:
-        def generate_text(self, *a, **k):
-            return "não sei"
-
-    sig = {"ticker": "X", "name": "X", "bench": "SPY", "reasons": [], "metrics": {"date": "2026-11-11"},
-           "tech_score": 50, "tech_notes": [], "levels": {}}
-    out = ds.classify_with_llm(Fake(), sig, "")
-    assert out["cause_type"] == "incerto"
-    assert out["verdict"] == "aguardar_estabilizacao"
-    assert out["ai_failed"] is True
-
-
-def test_classify_marks_failure_on_exception_or_missing_client():
-    class Boom:
-        def generate_text(self, *a, **k):
-            raise RuntimeError("429")
-
-    sig = {"ticker": "X", "name": "X", "bench": "SPY", "reasons": [], "metrics": {},
-           "tech_score": 50, "tech_notes": [], "levels": {}}
-    assert ds.classify_with_llm(Boom(), sig, "")["ai_failed"] is True
-    assert ds.classify_with_llm(None, sig, "")["ai_failed"] is True
-
-
-def test_valid_uncertain_answer_is_not_a_failure():
-    class Fake:
-        def generate_text(self, *a, **k):
-            return json.dumps({"cause_type": "incerto", "verdict": "evitar", "confidence": 40})
-
-    sig = {"ticker": "X", "name": "X", "bench": "SPY", "reasons": [], "metrics": {},
-           "tech_score": 50, "tech_notes": [], "levels": {}}
-    out = ds.classify_with_llm(Fake(), sig, "")
-    assert out["cause_type"] == "incerto" and not out.get("ai_failed")
-
-
 def test_ai_failures_excluded_from_ai_groups_but_counted_in_total():
     journal = [
         {"date": "2026-11-16", "ticker": "A", "cause_type": "incerto", "verdict": "aguardar_estabilizacao",
@@ -300,34 +244,6 @@ def test_ai_failures_excluded_from_ai_groups_but_counted_in_total():
     st = ds.journal_stats(journal)
     assert st["todos"]["n"] == 2
     assert st["causa"]["incerto"]["n"] == 1 and st["veredito"]["aguardar_estabilizacao"]["n"] == 1
-
-
-def test_classify_normalises_unknown_labels():
-    class Fake:
-        def generate_text(self, *a, **k):
-            return json.dumps({"cause_type": "temporária", "verdict": "comprar", "confidence": 70})
-
-    sig = {"ticker": "X", "name": "X", "bench": "SPY", "reasons": [], "metrics": {},
-           "tech_score": 50, "tech_notes": [], "levels": {}}
-    out = ds.classify_with_llm(Fake(), sig, "")
-    assert out["cause_type"] == "incerto" and out["verdict"] == "aguardar_estabilizacao"
-
-
-def test_prompt_includes_market_and_earnings_context():
-    seen = {}
-
-    class Fake:
-        def generate_text(self, prompt, **k):
-            seen["prompt"] = prompt
-            return "{}"
-
-    sig = {"ticker": "X", "name": "X", "bench": "SPY", "reasons": [], "metrics": {"abn_1d": -3.1},
-           "tech_score": 50, "tech_notes": [], "levels": {},
-           "market": {"spy_ret_1d": -3.0, "market_day": True},
-           "earnings": {"known": True, "reaction_sessions_ago": 0, "eps_surprise_pct": 2.0, "next_date": None}}
-    ds.classify_with_llm(Fake(), sig, "")
-    assert "DIA DE MERCADO" in seen["prompt"] and "reação a resultados hoje" in seen["prompt"]
-    assert "abn_1d: -3.1" in seen["prompt"]
 
 
 # --------------------------------------------------------------------------
@@ -400,46 +316,63 @@ def test_benchmarks_include_universe_etfs():
     assert {"IBIT", "XLF", "SPY", "QQQ"} <= set(ds.DipScanConfig().benchmarks)
 
 
-def test_run_dry_writes_site(tmp_path, monkeypatch):
+# --------------------------------------------------------------------------
+# Saída JSON (entrada da análise diária)
+# --------------------------------------------------------------------------
+
+def test_scan_writes_json_for_analysis(tmp_path, monkeypatch):
     frames = _bench_frames({"AAA": _frame(drop_pct=9, vol_mult=4), "BBB": _frame(seed=3), "SPY": _frame(seed=1)})
     monkeypatch.setattr(ds, "fetch_history", lambda tickers, period="1y": frames)
-    monkeypatch.setattr(ds, "fetch_earnings", lambda t: pytest.fail("dry-run não deve consultar resultados"))
-    cfg = ds.DipScanConfig(universe={"AAA": ("Alpha", "SPY"), "BBB": ("Beta", "QQQ")}, output_dir=tmp_path)
-    assert ds.run(cfg, dry_run=True) == 0
-    html_text = (tmp_path / "index.html").read_text()
-    assert "AAA" in html_text and "Registro de sinais" in html_text and "Veredito: Entrar" in html_text
-    journal = json.loads((tmp_path / "data" / "signals.json").read_text())
-    assert [r["ticker"] for r in journal] == ["AAA"]
-    assert {"abn_1d", "beta", "gap_pct", "intensity", "market_day", "spy_d200"} <= set(journal[0])
-    assert "Regime: SPY abaixo da MM200" in html_text
-    # segunda execução no mesmo pregão é ignorada
-    assert ds.run(cfg, dry_run=True) == 0
-    assert len(json.loads((tmp_path / "data" / "signals.json").read_text())) == 1
+    monkeypatch.setattr(ds, "fetch_earnings", lambda t: [])
+    cfg = ds.DipScanConfig(universe={"AAA": ("Alpha", "SPY"), "BBB": ("Beta", "QQQ")})
+    journal_path = tmp_path / "j.json"
+    journal_path.write_text(json.dumps([
+        {"date": "2026-10-01", "ticker": "BBB", "verdict": "entrar", "cause_type": "pontual",
+         "levels": {"entry_low": 1, "stop": 0.5, "target": 9e9}},
+    ]))
+    out = tmp_path / "day.json"
+    assert ds.run(cfg, out, journal_path) == 0
+    day = json.loads(out.read_text())
+    assert day["date"] == "2026-11-11"
+    assert [s["ticker"] for s in day["signals"]] == ["AAA"]
+    rec = day["signals"][0]["record"]
+    assert rec["ticker"] == "AAA" and rec["name"] == "Alpha" and rec["levels"]
+    assert {"abn_1d", "beta", "gap_pct", "intensity", "market_day", "spy_d200", "tech_score"} <= set(rec)
+    assert "cause_type" not in rec and "verdict" not in rec  # a análise acrescenta depois
+    assert day["signals"][0]["earnings_text"]
+    # registro anterior recebeu resultados e entra nas estatísticas
+    assert day["journal"][0]["outcomes"]["basis"] == "next_open"
+    assert day["stats"]["todos"]["n"] == 1 and day["stats"]["veredito"]["entrar"]["n"] == 1
+    assert {w["ticker"] for w in day["watch"]} == {"AAA", "BBB"}
 
 
-def test_message_is_telegram_html_with_escaped_text():
-    sig = {"ticker": "AAA", "bench": "SPY", "metrics": {"ret_1d": -7.0, "abn_1d": -2.0},
-           "ai": {"cause_type": "pontual", "verdict": "entrar", "cause_summary": "lucro <esperado> & guidance"},
-           "levels": {}, "earnings": {}}
-    msg = ds.build_message("2026-11-11", [sig], "https://x.github.io/stock_market_radar/")
-    assert '<a href="https://x.github.io/stock_market_radar/">' in msg
-    assert "<b>AAA</b>" in msg and "lucro &lt;esperado&gt; &amp; guidance" in msg
-    assert "*" not in msg
+def test_scan_without_journal_and_earnings(tmp_path, monkeypatch):
+    frames = _bench_frames({"AAA": _frame(drop_pct=9, vol_mult=4), "SPY": _frame(seed=1)})
+    monkeypatch.setattr(ds, "fetch_history", lambda tickers, period="1y": frames)
+    monkeypatch.setattr(ds, "fetch_earnings", lambda t: pytest.fail("não deve consultar resultados"))
+    out = tmp_path / "sub" / "day.json"
+    cfg = ds.DipScanConfig(universe={"AAA": ("Alpha", "SPY")})
+    assert ds.run(cfg, out, None, earnings=False) == 0
+    day = json.loads(out.read_text())
+    assert day["journal"] == [] and day["signals"][0]["earnings"] == {"known": False}
 
 
-def test_message_and_card_flag_ai_failure():
-    sig = {"ticker": "AAA", "name": "A", "bench": "SPY", "reasons": [], "metrics": {"ret_1d": -7.0},
-           "ai": {**ds.AI_FAILED, "cause_summary": "A IA falhou nesta execução."},
-           "levels": {}, "earnings": {}, "tech_score": 50, "tech_notes": []}
-    msg = ds.build_message("2026-11-11", [sig], "")
-    assert "⚪ <b>AAA</b>" in msg and "IA falhou" in msg and "Incerto" not in msg
-    assert "IA falhou" in ds._signal_card(sig)
+def test_scan_fails_without_market_data(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "fetch_history", lambda tickers, period="1y": {})
+    assert ds.run(ds.DipScanConfig(), tmp_path / "d.json") == 1
+    assert not (tmp_path / "d.json").exists()
 
 
-def test_message_flags_market_day_and_earnings():
-    sig = {"ticker": "AAA", "bench": "SPY", "metrics": {"ret_1d": -7.0, "abn_1d": -2.0},
-           "ai": {"cause_type": "pontual", "verdict": "entrar"}, "levels": {},
-           "earnings": {"known": True, "reaction_sessions_ago": 0, "next_date": "2026-11-18"}}
-    msg = ds.build_message("2026-11-11", [sig], "", {"spy_ret_1d": -3.0, "market_day": True})
-    assert "Dia de mercado" in msg and "📅 resultados" in msg and "2026-11-18" in msg
-    assert "β-aj. -2.0%" in msg
+def test_stats_command(tmp_path, capsys):
+    j = tmp_path / "j.json"
+    j.write_text(json.dumps([
+        {"date": "2026-11-16", "ticker": "A", "cause_type": "pontual", "verdict": "entrar",
+         "outcomes": {"ret_5d": 3.0, "exit": "alvo", "exit_ret": 4.0}},
+        {"date": "2026-11-16", "ticker": "B", "cause_type": "incerto", "verdict": "aguardar_estabilizacao",
+         "ai_failed": True, "outcomes": {"ret_5d": -1.0}},
+    ]))
+    assert ds.main(["stats", "--journal", str(j)]) == 0
+    st = json.loads(capsys.readouterr().out)
+    assert st["todos"]["n"] == 2 and st["veredito"]["entrar"]["win_5d"] == 100
+    assert st["causa"]["incerto"]["n"] == 0
+    assert st["analista"]["gemini"]["n"] == 1 and st["analista"]["claude"]["n"] == 0

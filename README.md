@@ -1,24 +1,14 @@
 # stockmarketradar
 
-Radar de oportunidades em ações americanas: escaneia o mercado depois do fechamento, cruza análise técnica, volume e notícias, pede uma leitura à IA e manda um resumo curto no Telegram.
+Radar de oportunidades em ações dos EUA. Depois do fechamento de Nova York, o código escaneia o mercado (técnica, volume, níveis) e o Claude pesquisa as notícias de cada sinal, classifica a causa da queda e escreve a análise do dia.
 
-## O que roda hoje
-
-**Dip Scanner**: procura quedas fortes com causa pontual (não estrutural) para swing de 3 a 10 dias, com níveis de entrada, stop e alvo, registro dos sinais e backtest. Detalhes em [docs/dip-scanner.md](docs/dip-scanner.md).
-
-Relatório: https://rafaelalvescosta-commits.github.io/stockmarketradar/
-
-## Começar
-
-1. Cadastre os secrets em Settings → Secrets and variables → Actions (lista em [docs/dip-scanner.md](docs/dip-scanner.md#secrets-e-variáveis)).
-2. Actions → Dip Scanner → Run workflow.
-3. Settings → Pages → *Deploy from a branch* → `gh-pages` / `(root)`.
-
-Localmente:
+- **Página**: o artefato "Radar do Pregão" no Claude, com o último pregão, os últimos 15 pregões e o placar dos sinais.
+- **Rotina**: tarefa agendada do Claude, de segunda a sexta às 19:45 (Brasília), seguindo `.claude/skills/radar-diario/SKILL.md`. O resumo chega como notificação no celular.
+- **Scanner**: Dip Scanner, quedas fortes com causa pontual para swing de 3 a 10 dias. Detalhes em [docs/dip-scanner.md](docs/dip-scanner.md).
 
 ```bash
 pip install -r requirements-dev.txt
-python -m radar.scanner --dry-run
+python -m radar.scanner scan --out out/day.json
 python -m pytest -q
 ```
 

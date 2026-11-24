@@ -258,14 +258,14 @@ def report(
             + _table([(f"< {split}", df[df["date"] < split]), (f">= {split}", df[df["date"] >= split])], cost_pct))
     add("\n== Por ano ==\n" + _table([(str(y), g) for y, g in df.groupby("year")], cost_pct))
     regime = df["spy_d200"]
-    add("\n== Regime (SPY face à MM200) ==\n" + _table(
+    add("\n== Regime (SPY vs MM200) ==\n" + _table(
         [("SPY acima MM200", df[regime > 0]), ("SPY abaixo MM200", df[regime <= 0])], cost_pct))
     add("\n== Dia de mercado ==\n" + _table(
         [("normal", df[df["market_day"] != True]), ("dia de mercado", df[df["market_day"] == True])],  # noqa: E712
         cost_pct))
     add("\n== Queda ajustada ao beta (abn_1d) ==\n" + _table(
         _buckets(df, "abn_1d", [-6, -2], ["< -6 (própria)", "-6 a -2", ">= -2 (contágio)"]), cost_pct))
-    add("\n== Ação face à MM200 ==\n" + _table(
+    add("\n== Ação vs MM200 ==\n" + _table(
         _buckets(df, "dist_sma200", [-15, 0], ["< -15%", "-15% a 0", "> 0"]), cost_pct))
     add("\n== Pontuação técnica ==\n" + _table(
         _buckets(df, "tech_score", [49.5, 64.5], ["< 50", "50-64", ">= 65"]), cost_pct))

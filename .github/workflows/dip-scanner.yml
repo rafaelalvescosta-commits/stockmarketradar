@@ -1,0 +1,81 @@
+name: Dip Scanner
+
+on:
+  # Depois do fechamento de Wall Street (21:00 UTC no inverno dos EUA, 20:00 UTC no verão).
+  # O GitHub pode atrasar execuções agendadas em algumas horas.
+  schedule:
+    - cron: '35 21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Reprocessar o último pregão'
+        required: false
+        default: false
+        type: boolean
+      tickers:
+        description: 'Substituir universo (ex.: NVDA:SMH,TTD). Vazio = DIP_UNIVERSE ou padrão'
+        required: false
+        default: ''
+
+concurrency:
+  group: dip-scanner
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Recuperar relatórios e registro anteriores (gh-pages)
+        run: |
+          mkdir -p site
+          if git fetch --depth 1 origin gh-pages 2>/dev/null; then
+            git archive FETCH_HEAD | tar -x -C site
+          fi
+
+      - name: Rodar Dip Scanner
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
+          DIP_UNIVERSE: ${{ vars.DIP_UNIVERSE }}
+          DIP_MIN_DROP_PCT: ${{ vars.DIP_MIN_DROP_PCT }}
+          DIP_MIN_ATR_MULT: ${{ vars.DIP_MIN_ATR_MULT }}
+          DIP_MIN_VOLUME_RATIO: ${{ vars.DIP_MIN_VOLUME_RATIO }}
+          DIP_MULTIDAY_DROP_PCT: ${{ vars.DIP_MULTIDAY_DROP_PCT }}
+          DIP_MAX_SIGNALS: ${{ vars.DIP_MAX_SIGNALS }}
+          DIP_COOLDOWN_SESSIONS: ${{ vars.DIP_COOLDOWN_SESSIONS }}
+          DIP_MARKET_DAY_PCT: ${{ vars.DIP_MARKET_DAY_PCT }}
+          DIP_REPORT_URL: ${{ vars.DIP_REPORT_URL }}
+          DIP_OUTPUT_DIR: site
+          INPUT_FORCE: ${{ github.event.inputs.force }}
+          INPUT_TICKERS: ${{ github.event.inputs.tickers }}
+        run: |
+          ARGS=()
+          if [ "$INPUT_FORCE" = "true" ]; then ARGS+=(--force); fi
+          if [ -n "$INPUT_TICKERS" ]; then ARGS+=(--tickers "$INPUT_TICKERS"); fi
+          python -m radar.scanner "${ARGS[@]}"
+
+      - name: Publicar em gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          publish_branch: gh-pages
+          commit_message: 'dip-scanner: report'

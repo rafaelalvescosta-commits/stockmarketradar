@@ -26,6 +26,7 @@ def _day(date="2026-11-24", journal=None):
 
 
 GOOD = {"cause_type": "pontual", "confidence": 70, "cause_summary": "Venda no setor.", "verdict": "aguardar_estabilizacao",
+        "morning_note": "Pré-mercado +1%.",
         "news": [{"title": "t", "url": "https://x.com/a", "source": "x", "date": "2026-11-24"}]}
 
 
@@ -52,6 +53,7 @@ def test_prepare_first_run_creates_docs_without_versions(tmp_path):
     assert all("if_version" not in w for w in res["writes"])
     sig = json.loads(open(next(w["file_path"] for w in res["writes"] if w["collection"] == "signals")).read())
     assert sig["ai_model"] == "claude" and sig["cause_type"] == "pontual" and sig["levels"]["stop"] == 341
+    assert sig["morning_note"] == "Pré-mercado +1%."
     state = json.loads(open(next(w["file_path"] for w in res["writes"] if w["collection"] == "meta")).read())
     assert state["status"]["ok"] and state["stats"]["todos"]["n"] == 1
     assert state["stats"]["analista"]["claude"]["n"] == 1

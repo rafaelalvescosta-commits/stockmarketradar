@@ -75,6 +75,7 @@ section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); }
 .facts b { color: var(--ink); font-family: var(--mono); font-weight: 500; }
 .trigger { border-left: 3px solid var(--accent); padding-left: 10px; font-size: 14px; }
+.morning { background: var(--acc-bg); border-radius: 10px; padding: 8px 12px; font-size: 14px; }
 .outcome { background: var(--sunk); border-radius: 10px; padding: 8px 12px; font-size: 14px; }
 details > summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
 details > summary::-webkit-details-marker { display: none; }
@@ -124,8 +125,8 @@ footer { font-size: 12px; color: var(--muted); max-width: 65ch; }
   </header>
 
   <section id="today" aria-labelledby="today-h">
-    <h2 id="today-h">Último pregão</h2>
-    <div class="empty" id="today-empty">A primeira análise aparece aqui depois do próximo fechamento de Nova York. A tarefa roda de segunda a sexta às 19:45 (Brasília).</div>
+    <h2 id="today-h">Pregão anterior · para hoje</h2>
+    <div class="empty" id="today-empty">A primeira análise aparece aqui na manhã seguinte ao próximo pregão. A rotina roda de segunda a sexta às 12:10 (Lisboa), antes da abertura de Nova York.</div>
   </section>
 
   <section id="history" aria-labelledby="hist-h">
@@ -253,6 +254,7 @@ footer { font-size: 12px; color: var(--muted); max-width: 65ch; }
       '<div class="lv"><span>Stop</span><b class="neg">' + num(lv.stop) + "</b></div>" +
       '<div class="lv"><span>Alvo</span><b class="pos">' + num(lv.target) + "</b></div>" +
       '<div class="lv"><span>R/R</span><b>' + num(lv.rr) + "</b></div></div>" +
+      (s.morning_note ? '<p class="morning"><b>Desde o fechamento:</b> ' + esc(s.morning_note) + "</p>" : "") +
       (s.trigger_to_enter ? '<p class="trigger"><b>Gatilho de entrada:</b> ' + esc(s.trigger_to_enter) + "</p>" : "") +
       '<div class="facts">' + facts + "</div>" +
       (withOutcome ? '<div class="outcome">' + outcomeText(s) + "</div>" : "") +

@@ -1,12 +1,14 @@
 ---
 name: radar-diario
-description: Rotina diária do Radar do Pregão. Roda o Dip Scanner no último pregão dos EUA, pesquisa as notícias de cada sinal, classifica a causa da queda, grava tudo no artefato "Radar do Pregão" e termina com um resumo curto. Use quando a tarefa agendada disparar ou quando o usuário pedir "rode o radar de hoje".
+description: Rotina diária do Radar do Pregão, na manhã seguinte ao pregão (12:10 de Lisboa, antes da abertura de Nova York). Roda o Dip Scanner no último pregão dos EUA, pesquisa as notícias de cada sinal (incluindo as da noite e do pré-mercado), classifica a causa da queda, grava tudo no artefato "Radar do Pregão" e termina com um resumo curto. Use quando a tarefa agendada disparar ou quando o usuário pedir "rode o radar de hoje".
 ---
 
 # Radar diário
 
 Artefato: https://claude.ai/artifact/BxBAauzTjPdS83K8MVVqVe (página "Radar do Pregão", banco de dados próprio).
-Usuário: trader de swing (3 a 10 dias) em ações dos EUA. Escreva tudo em **português do Brasil**, direto e sem jargão desnecessário.
+Usuário: trader de swing (3 a 10 dias) em ações dos EUA. Lê o radar na hora do almoço em Lisboa, antes da abertura de Nova York, para se preparar para o pregão do dia. Escreva tudo em **português do Brasil**, direto e sem jargão desnecessário.
+
+A rotina roda de manhã: `date` no `day.json` é o **pregão anterior** (o último fechado), e o trade, se houver, seria feito **no pregão de hoje**.
 
 A parte numérica (gatilhos, níveis, resultados, estatísticas) é do código. **Nunca invente ou altere números**: sua parte é notícia, causa, veredito e texto.
 
@@ -47,11 +49,15 @@ python -m radar.scanner scan --journal $W/journal.json --out $W/day.json
 
 - Código de saída 1 (sem dados de mercado): tente mais uma vez em 2 minutos. Se falhar de novo, pule para o passo 6 e registre a falha.
 - Leia `$W/day.json`: `date`, `market_text`, `signals` (cada um com `record`, `metrics`, `earnings_text`, `tech_notes`, `levels`), `stats`.
-- Se `date` já estiver em `$W/db/days/` (feriado ou execução repetida), não analise sinais: vá direto ao passo 5 com `{"signals": {}}` (só os resultados serão atualizados).
+- Se `date` já estiver em `$W/db/days/` (feriado nos EUA, como o dia seguinte a Thanksgiving, ou execução repetida), não analise sinais: vá direto ao passo 5 com `{"signals": {}}` (só os resultados serão atualizados).
 
 ## 3. Analisar cada sinal
 
 Para cada sinal (no máximo 8), use WebSearch para descobrir **por que a ação caiu** no pregão `date`, com 2 ou 3 buscas por ação, por exemplo `"<Empresa> stock falls <mês dia>"`, `"<TICKER> shares drop reason"` e, se houver resultados recentes (`earnings_text`), `"<Empresa> earnings guidance"`. Prefira fontes primárias e agências (Reuters, Bloomberg, CNBC, WSJ, Barron's, MarketWatch, comunicados da empresa). Abra a matéria principal quando o título não bastar.
+
+Depois, **o que mudou desde o fechamento**: 1 busca por ação sobre a noite e a manhã de hoje (`"<TICKER> premarket"`, `"<Empresa> news today"`): notícias depois do fechamento, rebaixamentos ou elevações de analistas, comentários da empresa e o movimento no pré-mercado, se alguma fonte informar. Registre em `morning_note`; se nada mudou, diga isso. Uma notícia nova pode mudar a causa ou o veredito: use a informação mais recente.
+
+Para o mercado, 1 busca sobre a manhã (`"stock futures today"`, agenda macro do dia: dados de inflação, emprego, decisão de juros, resultados importantes antes da abertura) para o resumo do dia.
 
 Classifique com este critério:
 
@@ -64,7 +70,7 @@ Use `abn_1d` (queda ajustada ao beta em relação ao ETF do setor): perto de 0 s
 Veredito:
 
 - **entrar**: causa pontual com convicção, sem resultados marcados dentro da janela do trade (`next_earnings`), e sinal técnico de estabilização (fechamento na metade de cima do dia, volume não extremo). Diga exatamente onde entrar dentro da faixa calculada.
-- **aguardar_estabilizacao**: causa pontual ou incerta, mas sem estabilização ainda. O `trigger_to_enter` precisa ser **objetivo e verificável no próximo pregão** (ex.: "fechamento acima de 212,40, a máxima de hoje", "não renovar a mínima de 386 por 2 pregões"). Nada de "esperar o mercado acalmar".
+- **aguardar_estabilizacao**: causa pontual ou incerta, mas sem estabilização ainda. O `trigger_to_enter` precisa ser **objetivo e verificável no pregão de hoje ou nos próximos** (ex.: "fechamento acima de 212,40, a máxima de hoje", "não renovar a mínima de 386 por 2 pregões"). Nada de "esperar o mercado acalmar".
 - **evitar**: causa estrutural, ou resultados dentro da janela, ou queda ainda em aceleração com notícia forte.
 
 Seja cético. Não invente notícias, números ou citações. Se não encontrar a causa, diga isso e use `incerto`. Considere o placar em `stats` (por exemplo, se "Aguardar" está indo melhor que "Entrar", ou se o regime de correção está derrubando os sinais) e mencione no resumo do dia quando for relevante.
@@ -74,7 +80,7 @@ Escreva `$W/analysis.json`:
 ```json
 {
   "ai_model": "claude",
-  "summary": "2 a 4 frases: tom do pregão (SPY/QQQ, regime), o que puxou as quedas, o sinal mais interessante e o que vigiar amanhã.",
+  "summary": "2 a 4 frases: tom do pregão anterior (SPY/QQQ, regime), o que puxou as quedas, o sinal mais interessante e o que vigiar hoje (futuros, agenda macro, pré-mercado dos sinais).",
   "signals": {
     "TICKER": {
       "cause_type": "pontual | estrutural | incerto",
@@ -86,6 +92,7 @@ Escreva `$W/analysis.json`:
       "verdict": "entrar | aguardar_estabilizacao | evitar",
       "trigger_to_enter": "condição objetiva para entrar",
       "comment_on_levels": "comentário curto sobre entrada, stop e alvo calculados",
+      "morning_note": "o que mudou desde o fechamento: notícias da noite, analistas, pré-mercado (ou 'nada relevante desde o fechamento')",
       "news": [{"title": "...", "url": "https://...", "source": "Reuters", "date": "2026-11-24"}]
     }
   }
@@ -94,7 +101,7 @@ Escreva `$W/analysis.json`:
 
 `confidence` é um número de 0 a 100. `news` tem de 2 a 5 itens que você realmente usou, só com URLs `https://`. Se não conseguir analisar um sinal (busca falhou), use `{"ai_failed": true, "cause_summary": "motivo"}` em vez de chutar.
 
-Sem sinais no dia: `"signals": {}` e um `summary` curto sobre o pregão.
+Sem sinais no dia: `"signals": {}` e um `summary` curto sobre o pregão anterior e o que vigiar hoje.
 
 ## 4. Preparar a gravação
 
@@ -120,11 +127,11 @@ Grave o status mesmo assim, para a página mostrar o problema: `get` de `meta/st
 A última mensagem vira a notificação no celular. Escreva só isto (sem tabelas):
 
 ```
-📉 Radar <dd/mm> · <N> sinal(is)
-<TICKER> <queda>: <causa em poucas palavras> → <veredito>
+📉 Radar · pregão de <dd/mm> · <N> sinal(is)
+<TICKER> <queda>: <causa em poucas palavras> → <veredito> (<pré-mercado, se souber>)
 ...
-<1 frase do resumo do dia>
+Hoje: <1 frase com o que vigiar no pregão de hoje>
 Página: https://claude.ai/artifact/BxBAauzTjPdS83K8MVVqVe
 ```
 
-Sem sinais: `📉 Radar <dd/mm> · sem quedas relevantes`, mais a frase do dia e o link.
+Sem sinais: `📉 Radar · pregão de <dd/mm> · sem quedas relevantes`, mais a frase de hoje e o link. Pregão já registrado (feriado nos EUA): diga que não houve pregão novo e dê o link.

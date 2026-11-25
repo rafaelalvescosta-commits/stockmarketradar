@@ -84,6 +84,15 @@ Na segunda, a rotina analisa o pregão de sexta. Depois de um feriado nos EUA, o
 
 Para rodar fora do horário, peça ao Claude: "rode o radar de hoje".
 
+### App do Mac
+
+A página pode ser instalada como app pelo app do Claude para Mac ("Instalar como app no Mac" na própria página, ou "Install as app" no menu do artefato). Instalada, ela:
+
+- ganha ícone próprio no Dock, com o número de sinais do último pregão no badge;
+- mostra um item na barra de menus com o número de sinais e, ao clicar, a lista do pregão (ticker, queda e veredito) e "Abrir o Radar". Esse item pede permissão uma vez, pelo botão "Mostrar na barra de menus".
+
+Badge e barra de menus se atualizam enquanto o app está aberto. A notificação do celular continua vindo da tarefa agendada.
+
 ### Banco do artefato
 
 | Documento | Conteúdo | Escrita |

@@ -2,7 +2,7 @@
 
 Radar de oportunidades em ações dos EUA. Depois do fechamento de Nova York, o código escaneia o mercado (técnica, volume, níveis) e o Claude pesquisa as notícias de cada sinal, classifica a causa da queda e escreve a análise do dia.
 
-- **Página**: o artefato "Radar do Pregão" no Claude, com o último pregão, os últimos 15 pregões e o placar dos sinais.
+- **Página**: o artefato "Radar do Pregão" no Claude, com o último pregão, os últimos 15 pregões e o placar dos sinais. No Mac, pode ser instalada como app, com badge no Dock e item na barra de menus.
 - **Rotina**: tarefa agendada do Claude, de segunda a sexta às 12:10 (Lisboa), na manhã seguinte ao pregão e antes da abertura de Nova York, seguindo `.claude/skills/radar-diario/SKILL.md`. O resumo chega como notificação no celular.
 - **Scanner**: Dip Scanner, quedas fortes com causa pontual para swing de 3 a 10 dias. Detalhes em [docs/dip-scanner.md](docs/dip-scanner.md).
 

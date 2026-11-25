@@ -72,13 +72,15 @@ Para mudar uma regra: rodar o backtest antes e depois com `--split`, e só mante
 
 ## Rotina diária
 
-Uma tarefa agendada do Claude roda de segunda a sexta às 19:45 (Brasília), depois do fechamento de Nova York, e segue o roteiro fixo em `.claude/skills/radar-diario/SKILL.md`:
+Uma tarefa agendada do Claude roda de segunda a sexta às 12:10 (Lisboa), na manhã seguinte ao pregão e antes da abertura de Nova York (14:30 em Lisboa), e segue o roteiro fixo em `.claude/skills/radar-diario/SKILL.md`:
 
 1. Lê o banco do artefato (sinais, resultados, pregões já gravados e `meta/state`).
 2. `python -m radar.store journal` monta o registro e `python -m radar.scanner scan` roda o scanner.
-3. Pesquisa as notícias de cada sinal e escreve `analysis.json` (causa, veredito, gatilho, riscos, fontes e o resumo do dia).
+3. Pesquisa as notícias de cada sinal, incluindo as da noite e do pré-mercado (`morning_note`), e escreve `analysis.json` (causa, veredito, gatilho, riscos, fontes e o resumo com o que vigiar no dia).
 4. `python -m radar.store prepare` valida a análise e gera o plano de gravação, que é aplicado com o ArtifactData.
 5. A última mensagem da sessão é o resumo curto que chega como notificação no celular.
+
+Na segunda, a rotina analisa o pregão de sexta. Depois de um feriado nos EUA, o pregão já está gravado e a rotina só atualiza os resultados.
 
 Para rodar fora do horário, peça ao Claude: "rode o radar de hoje".
 

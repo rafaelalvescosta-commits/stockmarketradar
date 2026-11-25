@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional
 from radar.scanner import CAUSE_LABELS, VERDICT_LABELS, journal_stats
 
 AI_FIELDS = ("cause_type", "confidence", "cause_summary", "why_classification", "catalysts", "risks",
-             "verdict", "trigger_to_enter", "comment_on_levels", "news")
+             "verdict", "trigger_to_enter", "comment_on_levels", "morning_note", "news")
 STATE_ID = "state"
 BATCH_MAX = 50
 

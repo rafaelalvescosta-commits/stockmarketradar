@@ -1,0 +1,401 @@
+<title>Radar do Pregão</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: uma coluna estreita de mesa de operações — resumo do pregão no topo, sinais, histórico de 15 pregões, placar. */
+:root {
+  --bg: #f4f6f9; --panel: #ffffff; --sunk: #eef1f5; --ink: #141820; --muted: #5d6573; --line: #dde2ea;
+  --accent: #2a55bd; --up: #17804f; --down: #bf3328; --hold: #9a6100; --off: #6c7380;
+  --up-bg: #e5f4ec; --down-bg: #fbe9e7; --hold-bg: #fbf0dc; --off-bg: #eceef2; --acc-bg: #e7edfb;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1116; --panel: #161a21; --sunk: #1c212a; --ink: #e6e9ef; --muted: #98a1ae; --line: #272d37;
+  --accent: #82a4ff; --up: #4cc38a; --down: #ff7d70; --hold: #f0b44e; --off: #9aa2ae;
+  --up-bg: #15291f; --down-bg: #331a18; --hold-bg: #2f2512; --off-bg: #222730; --acc-bg: #1b2440;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0e1116; --panel: #161a21; --sunk: #1c212a; --ink: #e6e9ef; --muted: #98a1ae; --line: #272d37;
+  --accent: #82a4ff; --up: #4cc38a; --down: #ff7d70; --hold: #f0b44e; --off: #9aa2ae;
+  --up-bg: #15291f; --down-bg: #331a18; --hold-bg: #2f2512; --off-bg: #222730; --acc-bg: #1b2440;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); }
+main { max-width: 760px; margin: 0 auto; padding-block: 20px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 28px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+p { margin: 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible, summary:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+
+header { display: flex; flex-direction: column; gap: 6px; }
+.head-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.status { font-size: 13px; color: var(--muted); }
+.status b { color: var(--ink); font-weight: 600; }
+.stale { color: var(--hold); }
+
+section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tape { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 14px; }
+.tape .tk { font-family: var(--mono); font-weight: 600; }
+.alert { background: var(--hold-bg); color: var(--hold); border-radius: 10px; padding: 10px 12px; font-weight: 500; font-size: 14px; }
+.brief { font-size: 16px; line-height: 1.6; max-width: 65ch; }
+
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; white-space: nowrap; }
+.c-up { background: var(--up-bg); color: var(--up); }
+.c-down { background: var(--down-bg); color: var(--down); }
+.c-hold { background: var(--hold-bg); color: var(--hold); }
+.c-off { background: var(--off-bg); color: var(--off); }
+.c-acc { background: var(--acc-bg); color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.ticker { font-family: var(--mono); font-size: 20px; font-weight: 600; }
+.name { color: var(--muted); font-size: 14px; }
+.move { font-family: var(--mono); font-size: 20px; font-weight: 600; white-space: nowrap; }
+.neg { color: var(--down); } .pos { color: var(--up); }
+.why { color: var(--muted); font-size: 14px; }
+.levels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.lv { background: var(--sunk); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.lv span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.lv b { font-family: var(--mono); font-weight: 600; font-size: 15px; font-variant-numeric: tabular-nums; }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); }
+.facts b { color: var(--ink); font-family: var(--mono); font-weight: 500; }
+.trigger { border-left: 3px solid var(--accent); padding-left: 10px; font-size: 14px; }
+.outcome { background: var(--sunk); border-radius: 10px; padding: 8px 12px; font-size: 14px; }
+details > summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: "▸ "; }
+details[open] > summary::before { content: "▾ "; }
+.more { display: flex; flex-direction: column; gap: 10px; padding-top: 8px; }
+.more h4 { margin: 0 0 2px; font-size: 13px; }
+.more ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.news li { margin-bottom: 4px; }
+
+.day { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+.day > summary { padding: 12px 14px; color: var(--ink); font-size: 14px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.day > summary::before { color: var(--muted); }
+.day-date { font-weight: 600; }
+.day-body { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.row { border-top: 1px solid var(--line); padding-top: 10px; }
+.row > summary { color: var(--ink); display: grid; grid-template-columns: 64px 64px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 14px; }
+.row > summary::before { display: none; }
+.row .card { margin-top: 10px; }
+
+.tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 8px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+tr.group td { background: var(--sunk); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; text-align: left; }
+tr:last-child td { border-bottom: 0; }
+
+.empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 14px; padding: 20px; color: var(--muted); }
+footer { font-size: 12px; color: var(--muted); max-width: 65ch; }
+
+@media (max-width: 480px) {
+  .levels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .row > summary { grid-template-columns: 56px 58px minmax(0, 1fr); }
+  .row > summary .row-out { grid-column: 1 / -1; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<main>
+  <header>
+    <div class="head-row">
+      <h1>Radar do Pregão</h1>
+      <span class="chip c-acc">Dip Scanner · EUA</span>
+    </div>
+    <p class="status" id="status">Carregando os dados do radar…</p>
+  </header>
+
+  <section id="today" aria-labelledby="today-h">
+    <h2 id="today-h">Último pregão</h2>
+    <div class="empty" id="today-empty">A primeira análise aparece aqui depois do próximo fechamento de Nova York. A tarefa roda de segunda a sexta às 19:45 (Brasília).</div>
+  </section>
+
+  <section id="history" aria-labelledby="hist-h">
+    <h2 id="hist-h">Últimos 15 pregões</h2>
+    <p class="small muted">Resultados medidos a partir da abertura seguinte ao sinal. Toque num sinal para ver a análise completa.</p>
+    <div id="days"></div>
+  </section>
+
+  <section id="score" aria-labelledby="score-h">
+    <h2 id="score-h">Placar</h2>
+    <p class="small muted">Todos os sinais registrados. “vs SPY” desconta o movimento do índice no mesmo período; “Trade médio” simula entrada na abertura seguinte com stop, alvo e saída em 10 sessões.</p>
+    <div class="tablewrap"><table id="stats"><tbody><tr><td class="muted">Sem dados ainda.</td></tr></tbody></table></div>
+  </section>
+
+  <footer>Ferramenta de apoio à decisão, não recomendação de investimento. Gatilhos, níveis e resultados são calculados pelo código do repositório stockmarketradar; causa, veredito e resumo são a leitura do Claude a partir de notícias públicas.</footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var CAUSE = { pontual: ["Pontual", "c-up"], estrutural: ["Estrutural", "c-down"], incerto: ["Incerto", "c-hold"] };
+  var VERDICT = { entrar: ["Entrar", "c-up"], aguardar_estabilizacao: ["Aguardar", "c-hold"], evitar: ["Evitar", "c-down"] };
+  var EXIT = { alvo: "alvo", stop: "stop", ambos: "stop (alvo e stop no mesmo dia)", tempo: "10 sessões", sem_entrada: "sem entrada" };
+  var GROUPS = [
+    ["Geral", "todos", null],
+    ["Por veredito", "veredito", { entrar: "Entrar", aguardar_estabilizacao: "Aguardar", evitar: "Evitar" }],
+    ["Por causa", "causa", { pontual: "Pontual", estrutural: "Estrutural", incerto: "Incerto" }],
+    ["Por regime", "regime", { correcao: "SPY abaixo da MM200", alta: "SPY acima da MM200" }],
+    ["Por analista", "analista", { claude: "Claude", gemini: "Gemini (até 18/11)" }]
+  ];
+  var WEEK = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+
+  var state = { days: [], signals: [], finals: {}, meta: null, loaded: false };
+
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function isNum(v) { return typeof v === "number" && isFinite(v); }
+  function pct(v, signed) {
+    if (!isNum(v)) return "—";
+    var s = Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+    if (signed === false) return s;
+    return (v > 0 ? "+" : v < 0 ? "−" : "") + s;
+  }
+  function num(v, d) {
+    if (!isNum(v)) return "—";
+    return v.toLocaleString("pt-BR", { minimumFractionDigits: d == null ? 2 : d, maximumFractionDigits: d == null ? 2 : d });
+  }
+  function cls(v) { return isNum(v) ? (v < 0 ? "neg" : v > 0 ? "pos" : "") : ""; }
+  function dayLabel(iso) {
+    var p = String(iso || "").split("-");
+    if (p.length !== 3) return esc(iso);
+    var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+    return WEEK[d.getUTCDay()] + ", " + p[2] + "/" + p[1];
+  }
+  function safeUrl(u) { return typeof u === "string" && u.indexOf("https://") === 0 ? u : null; }
+  function chip(label, c) { return '<span class="chip ' + c + '">' + esc(label) + "</span>"; }
+
+  function aiChips(s) {
+    if (s.ai_failed) return chip("Análise falhou", "c-off");
+    var out = "";
+    var c = CAUSE[s.cause_type];
+    if (c) out += chip(c[0] + (isNum(s.confidence) ? " · " + s.confidence + "%" : ""), c[1]);
+    var v = VERDICT[s.verdict];
+    if (v) out += chip(v[0], v[1]);
+    return out;
+  }
+  function earningsChips(s) {
+    var out = "";
+    if (isNum(s.earnings_reaction)) out += chip(s.earnings_reaction === 0 ? "Resultados hoje" : "Resultados há " + s.earnings_reaction + " sessão(ões)", "c-acc");
+    if (s.next_earnings) out += chip("Próximos resultados " + dayLabel(s.next_earnings), "c-down");
+    if (s.market_day) out += chip("Dia de mercado", "c-hold");
+    return out;
+  }
+  function outcomeText(s) {
+    var o = s.outcomes || {};
+    var parts = [];
+    [3, 5, 10].forEach(function (n) { if (isNum(o["ret_" + n + "d"])) parts.push(n + "d <b class=\"num " + cls(o["ret_" + n + "d"]) + "\">" + pct(o["ret_" + n + "d"]) + "</b>"); });
+    if (isNum(o.excess_5d)) parts.push("vs SPY 5d <b class=\"num\">" + pct(o.excess_5d) + "</b>");
+    if (o.exit) parts.push("saída: " + esc(EXIT[o.exit] || o.exit) + (isNum(o.exit_ret) ? " <b class=\"num " + cls(o.exit_ret) + "\">" + pct(o.exit_ret) + "</b>" : ""));
+    if (!parts.length) return isNum(o.entry_open) ? "Entrada na abertura a " + num(o.entry_open) + "; resultados a partir de 3 sessões." : "Aguardando o próximo pregão.";
+    return parts.join(" · ");
+  }
+  function list(items) {
+    if (!Array.isArray(items) || !items.length) return "";
+    return "<ul>" + items.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
+  }
+  function newsList(items) {
+    if (!Array.isArray(items) || !items.length) return "";
+    return '<ul class="news">' + items.map(function (n) {
+      var u = safeUrl(n && n.url);
+      var t = esc((n && n.title) || u || "");
+      var meta = [n && n.source, n && n.date].filter(Boolean).map(esc).join(" · ");
+      return "<li>" + (u ? '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + t + "</a>" : t) + (meta ? ' <span class="muted small">' + meta + "</span>" : "") + "</li>";
+    }).join("") + "</ul>";
+  }
+
+  function card(s, withOutcome) {
+    var lv = s.levels || {};
+    var facts = [
+      ["vs " + (s.bench || "ETF") + " (β-aj.)", pct(s.abn_1d)],
+      ["3 sessões", pct(s.ret_3d)],
+      ["gap", pct(s.gap_pct)],
+      ["volume", isNum(s.volume_ratio) ? num(s.volume_ratio, 1) + "×" : "—"],
+      ["RSI", isNum(s.rsi14) ? num(s.rsi14, 0) : "—"],
+      ["técnica", isNum(s.tech_score) ? s.tech_score + "/100" : "—"]
+    ].map(function (f) { return "<span>" + esc(f[0]) + " <b>" + f[1] + "</b></span>"; }).join("");
+    var more = "";
+    if (Array.isArray(s.catalysts) && s.catalysts.length) more += "<div><h4>Catalisadores</h4>" + list(s.catalysts) + "</div>";
+    if (Array.isArray(s.risks) && s.risks.length) more += "<div><h4>Riscos</h4>" + list(s.risks) + "</div>";
+    if (s.comment_on_levels) more += '<p class="small">' + esc(s.comment_on_levels) + "</p>";
+    if (Array.isArray(s.tech_notes) && s.tech_notes.length) more += "<div><h4>Técnica</h4>" + list(s.tech_notes) + "</div>";
+    if (Array.isArray(s.reasons) && s.reasons.length) more += '<p class="small muted">Gatilho: ' + esc(s.reasons.join(", ")) + "</p>";
+    if (Array.isArray(s.news) && s.news.length) more += "<div><h4>Notícias</h4>" + newsList(s.news) + "</div>";
+    return '<article class="card">' +
+      '<div class="card-top"><div><span class="ticker">' + esc(s.ticker) + '</span> <span class="name">' + esc(s.name || "") + "</span></div>" +
+      '<span class="move ' + cls(s.ret_1d) + '">' + pct(s.ret_1d) + "</span></div>" +
+      '<div class="chips">' + aiChips(s) + earningsChips(s) + "</div>" +
+      (s.cause_summary ? "<p>" + esc(s.cause_summary) + "</p>" : "") +
+      (s.why_classification ? '<p class="why">' + esc(s.why_classification) + "</p>" : "") +
+      '<div class="levels">' +
+      '<div class="lv"><span>Entrada</span><b>' + num(lv.entry_low) + "–" + num(lv.entry_high) + "</b></div>" +
+      '<div class="lv"><span>Stop</span><b class="neg">' + num(lv.stop) + "</b></div>" +
+      '<div class="lv"><span>Alvo</span><b class="pos">' + num(lv.target) + "</b></div>" +
+      '<div class="lv"><span>R/R</span><b>' + num(lv.rr) + "</b></div></div>" +
+      (s.trigger_to_enter ? '<p class="trigger"><b>Gatilho de entrada:</b> ' + esc(s.trigger_to_enter) + "</p>" : "") +
+      '<div class="facts">' + facts + "</div>" +
+      (withOutcome ? '<div class="outcome">' + outcomeText(s) + "</div>" : "") +
+      (more ? '<details><summary>Catalisadores, riscos e notícias</summary><div class="more">' + more + "</div></details>" : "") +
+      "</article>";
+  }
+
+  function withOutcome(s) {
+    var id = s.date + "_" + s.ticker;
+    var open = state.meta && state.meta.open_outcomes && state.meta.open_outcomes[id];
+    var o = open || state.finals[id] || s.outcomes || {};
+    return Object.assign({}, s, { outcomes: o });
+  }
+  function signalsOf(date) {
+    return state.signals.filter(function (s) { return s.date === date; }).map(withOutcome)
+      .sort(function (a, b) { return (a.ret_1d || 0) - (b.ret_1d || 0); });
+  }
+
+  function renderStatus() {
+    var el = document.getElementById("status");
+    var st = (state.meta && state.meta.status) || {};
+    var latest = state.days[0];
+    if (!state.loaded) return;
+    if (!latest && !st.last_run) { el.textContent = "Sem análises ainda."; return; }
+    var txt = "Pregão mais recente: <b>" + (latest ? dayLabel(latest.date) : "—") + "</b>";
+    if (st.last_run) {
+      var d = new Date(st.last_run);
+      if (!isNaN(d)) txt += " · atualizado " + esc(d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }));
+    }
+    var stale = false;
+    if (latest) {
+      var age = (Date.now() - new Date(latest.date + "T21:00:00Z").getTime()) / 86400000;
+      stale = age > 4;
+    }
+    if (st.ok === false) txt += ' · <span class="stale">a última execução teve problema: ' + esc(st.message || "sem detalhes") + "</span>";
+    else if (stale) txt += ' · <span class="stale">sem atualização há alguns dias</span>';
+    el.innerHTML = txt;
+  }
+
+  function renderToday() {
+    var sec = document.getElementById("today");
+    var latest = state.days[0];
+    var empty = document.getElementById("today-empty");
+    var old = sec.querySelector(".today-body");
+    if (old) old.remove();
+    if (!latest) { empty.hidden = false; return; }
+    empty.hidden = true;
+    var m = latest.market || {};
+    var tape = '<div class="tape"><span class="day-date">' + dayLabel(latest.date) + "</span>" +
+      '<span><span class="tk">SPY</span> <b class="num ' + cls(m.spy_ret_1d) + '">' + pct(m.spy_ret_1d) + "</b></span>" +
+      '<span><span class="tk">QQQ</span> <b class="num ' + cls(m.qqq_ret_1d) + '">' + pct(m.qqq_ret_1d) + "</b></span>" +
+      (isNum(m.spy_d200) ? chip(m.spy_d200 <= 0 ? "Correção · SPY " + pct(m.spy_d200) + " vs MM200" : "Alta · SPY " + pct(m.spy_d200) + " vs MM200", m.spy_d200 <= 0 ? "c-down" : "c-up") : "") +
+      "</div>";
+    var alert = m.market_day ? '<div class="alert">Dia de mercado: queda generalizada, boa parte dos movimentos é do índice.</div>' : "";
+    var brief = latest.summary ? '<p class="brief">' + esc(latest.summary) + "</p>" : "";
+    var sigs = signalsOf(latest.date);
+    var cards = sigs.length ? sigs.map(function (s) { return card(s, true); }).join("") :
+      '<div class="empty">Nenhuma queda relevante no universo neste pregão.</div>';
+    var wrap = document.createElement("div");
+    wrap.className = "today-body";
+    wrap.style.display = "flex"; wrap.style.flexDirection = "column"; wrap.style.gap = "12px";
+    wrap.innerHTML = tape + alert + brief + cards;
+    sec.appendChild(wrap);
+  }
+
+  function renderHistory() {
+    var box = document.getElementById("days");
+    var days = state.days.slice(1);
+    if (!days.length) {
+      box.innerHTML = '<div class="empty">' + (state.days.length ? "Os pregões anteriores aparecem aqui." : "O histórico aparece aqui conforme os pregões forem analisados.") + "</div>";
+      return;
+    }
+    box.innerHTML = days.map(function (d, i) {
+      var sigs = signalsOf(d.date);
+      var m = d.market || {};
+      var rows = sigs.map(function (s) {
+        var v = s.ai_failed ? chip("Falhou", "c-off") : (VERDICT[s.verdict] ? chip(VERDICT[s.verdict][0], VERDICT[s.verdict][1]) : "");
+        var o = s.outcomes || {};
+        var res = o.exit ? (EXIT[o.exit] || o.exit) + " " + pct(o.exit_ret) : isNum(o.ret_5d) ? "5d " + pct(o.ret_5d) : isNum(o.ret_3d) ? "3d " + pct(o.ret_3d) : "em aberto";
+        var resNum = isNum(o.exit_ret) ? o.exit_ret : isNum(o.ret_5d) ? o.ret_5d : o.ret_3d;
+        return '<details class="row"><summary><span class="mono"><b>' + esc(s.ticker) + "</b></span>" +
+          '<span class="num ' + cls(s.ret_1d) + '">' + pct(s.ret_1d) + "</span><span>" + v + "</span>" +
+          '<span class="row-out num small ' + cls(resNum) + '">' + esc(res) + "</span></summary>" + card(s, true) + "</details>";
+      }).join("");
+      return '<details class="day"' + (i < 2 ? " open" : "") + "><summary>" +
+        '<span class="day-date">' + dayLabel(d.date) + "</span>" +
+        '<span class="muted">' + (sigs.length ? sigs.length + " sinal(is)" : "sem sinais") + "</span>" +
+        '<span class="muted small">SPY ' + pct(m.spy_ret_1d) + (m.market_day ? " · dia de mercado" : "") + "</span></summary>" +
+        '<div class="day-body">' + (d.summary ? '<p class="small">' + esc(d.summary) + "</p>" : "") +
+        (rows || '<p class="small muted">Nenhuma queda relevante.</p>') + "</div></details>";
+    }).join("");
+  }
+
+  function renderStats() {
+    var t = document.getElementById("stats");
+    var st = state.meta && state.meta.stats;
+    if (!st || !st.todos) return;
+    var head = "<thead><tr><th>Grupo</th><th>Sinais</th><th>Com 5d</th><th>Média 5d</th><th>vs SPY 5d</th><th>% positivos</th><th>% alvo antes do stop</th><th>Trade médio</th></tr></thead>";
+    var body = GROUPS.map(function (g) {
+      var block = g[1] === "todos" ? { Todos: st.todos } : {};
+      if (g[2]) Object.keys(g[2]).forEach(function (k) { var v = (st[g[1]] || {})[k]; if (v && v.n) block[g[2][k]] = v; });
+      var rows = Object.keys(block).map(function (label) {
+        var v = block[label];
+        return "<tr><td>" + esc(label) + "</td><td>" + v.n + "</td><td>" + v.n_closed + "</td>" +
+          '<td class="' + cls(v.avg_5d) + '">' + pct(v.avg_5d) + '</td><td class="' + cls(v.avg_excess_5d) + '">' + pct(v.avg_excess_5d) + "</td>" +
+          "<td>" + pct(v.win_5d, false) + "</td><td>" + pct(v.target_rate, false) + '</td><td class="' + cls(v.avg_trade) + '">' + pct(v.avg_trade) + "</td></tr>";
+      }).join("");
+      return rows ? '<tr class="group"><td colspan="8">' + esc(g[0]) + "</td></tr>" + rows : "";
+    }).join("");
+    t.innerHTML = head + "<tbody>" + body + "</tbody>";
+  }
+
+  function render() { renderStatus(); renderToday(); renderHistory(); renderStats(); }
+
+  var timer = setTimeout(function () {
+    if (!state.loaded) document.getElementById("status").textContent = "Não foi possível carregar os dados agora. Tente abrir de novo em instantes.";
+  }, 10000);
+
+  function done() { state.loaded = true; clearTimeout(timer); }
+  function fail(e) {
+    clearTimeout(timer);
+    document.getElementById("status").textContent = "Erro ao ler os dados do radar (" + ((e && e.code) || "desconhecido") + ").";
+  }
+
+  if (!window.claude || !window.claude.use) { fail({ code: "fora do Claude" }); return; }
+  window.claude.use("db").then(function (db) {
+    if (!db) { fail({ code: "indisponível" }); return; }
+    db.collection("days").orderBy("date", "desc").limit(15).onSnapshot(function (snap) {
+      state.days = snap.docs.map(function (d) { return d.data(); }).filter(function (d) { return d && d.date; });
+      if (!snap.metadata.fromCache) done();
+      render();
+    }, fail);
+    db.collection("signals").orderBy("date", "desc").limit(400).onSnapshot(function (snap) {
+      state.signals = snap.docs.map(function (d) { return d.data(); }).filter(Boolean);
+      render();
+    }, fail);
+    db.collection("outcomes").orderBy("date", "desc").limit(400).onSnapshot(function (snap) {
+      var f = {};
+      snap.docs.forEach(function (d) { var b = d.data(); if (b && b.outcomes) f[d.id] = b.outcomes; });
+      state.finals = f;
+      render();
+    }, fail);
+    db.doc("meta/state").onSnapshot(function (snap) { state.meta = snap.exists ? snap.data() : null; render(); }, fail);
+  });
+})();
+</script>

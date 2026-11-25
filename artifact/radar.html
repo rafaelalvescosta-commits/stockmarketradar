@@ -1,5 +1,6 @@
 <title>Radar do Pregão</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<script type="application/json" id="claude-artifacts-manifest">{"permissions": ["menu-bar"]}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -104,6 +105,10 @@ th { color: var(--muted); font-weight: 500; font-size: 12px; }
 tr.group td { background: var(--sunk); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; text-align: left; }
 tr:last-child td { border-bottom: 0; }
 
+.desk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; color: var(--muted); }
+.btn { font: 600 13px/1 var(--sans); color: var(--accent); background: var(--acc-bg); border: 0; border-radius: 999px; padding: 8px 14px; cursor: pointer; }
+.btn:hover { filter: brightness(0.97); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 14px; padding: 20px; color: var(--muted); }
 footer { font-size: 12px; color: var(--muted); max-width: 65ch; }
 
@@ -122,6 +127,7 @@ footer { font-size: 12px; color: var(--muted); max-width: 65ch; }
       <span class="chip c-acc">Dip Scanner · EUA</span>
     </div>
     <p class="status" id="status">Carregando os dados do radar…</p>
+    <div class="desk" id="desk" hidden><button class="btn" id="desk-btn" type="button"></button><span id="desk-note"></span></div>
   </header>
 
   <section id="today" aria-labelledby="today-h">
@@ -367,7 +373,119 @@ footer { font-size: 12px; color: var(--muted); max-width: 65ch; }
     t.innerHTML = head + "<tbody>" + body + "</tbody>";
   }
 
-  function render() { renderStatus(); renderToday(); renderHistory(); renderStats(); }
+  // ---------- App do Mac (capability desktop): ícone, badge no Dock e item na barra de menus ----------
+  var desk = { api: null, trayOn: false, key: null };
+
+  function roundRect(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+  function drawAppIcon() {
+    var c = document.createElement("canvas"); c.width = c.height = 256;
+    var g = c.getContext("2d");
+    roundRect(g, 22, 22, 212, 212, 48); g.fillStyle = "#15203a"; g.fill(); g.clip();
+    g.lineWidth = 5; g.strokeStyle = "rgba(130,164,255,0.5)";
+    [44, 78, 112].forEach(function (rad) { g.beginPath(); g.arc(128, 196, rad, Math.PI * 1.1, Math.PI * 1.9); g.stroke(); });
+    g.lineCap = "round"; g.lineJoin = "round"; g.lineWidth = 15;
+    g.strokeStyle = "#ff7d70"; g.beginPath(); g.moveTo(58, 82); g.lineTo(98, 118); g.lineTo(122, 104); g.lineTo(152, 168); g.stroke();
+    g.strokeStyle = "#4cc38a"; g.beginPath(); g.moveTo(152, 168); g.lineTo(196, 120); g.stroke();
+    g.fillStyle = "#ffffff"; g.beginPath(); g.arc(152, 168, 11, 0, Math.PI * 2); g.fill();
+    return c.toDataURL("image/png");
+  }
+  function drawTrayIcon() {
+    var c = document.createElement("canvas"); c.width = c.height = 36;
+    var g = c.getContext("2d");
+    g.strokeStyle = "#000"; g.lineWidth = 3.2; g.lineCap = "round"; g.lineJoin = "round";
+    g.beginPath(); g.moveTo(4, 9); g.lineTo(13, 18); g.lineTo(18, 14); g.lineTo(27, 27); g.stroke();
+    g.beginPath(); g.moveTo(20, 27); g.lineTo(27, 27); g.lineTo(27, 20); g.stroke();
+    return c.toDataURL("image/png");
+  }
+  function showWindow() { if (desk.api) desk.api.window.show().catch(function () {}); }
+  function trayOptions() {
+    var latest = state.days[0];
+    var sigs = latest ? signalsOf(latest.date) : [];
+    var menu = [];
+    if (latest) {
+      menu.push({ label: "Pregão de " + dayLabel(latest.date) + (sigs.length ? " · " + sigs.length + " sinal(is)" : " · sem sinais"), enabled: false });
+      sigs.forEach(function (s) {
+        var v = s.ai_failed ? "análise falhou" : (VERDICT[s.verdict] ? VERDICT[s.verdict][0] : "—");
+        menu.push({ label: s.ticker + "  " + pct(s.ret_1d) + "  ·  " + v, click: showWindow });
+      });
+    } else {
+      menu.push({ label: "Sem análises ainda", enabled: false });
+    }
+    menu.push({ type: "separator" }, { label: "Abrir o Radar", click: showWindow });
+    return {
+      icon: drawTrayIcon(),
+      title: sigs.length ? String(sigs.length) : "",
+      toolTip: latest ? "Pregão de " + dayLabel(latest.date) + ": " + (sigs.map(function (s) { return s.ticker; }).join(", ") || "sem sinais") : "Sem análises ainda",
+      menu: menu
+    };
+  }
+  function deskNote(btnText, onClick, note) {
+    var box = document.getElementById("desk"), btn = document.getElementById("desk-btn");
+    box.hidden = !btnText && !note;
+    btn.hidden = !btnText;
+    btn.textContent = btnText || "";
+    btn.onclick = onClick || null;
+    document.getElementById("desk-note").textContent = note || "";
+  }
+  function turnTrayOn() {
+    return desk.api.tray.set(trayOptions()).then(function () {
+      desk.trayOn = true; deskNote(null);
+    });
+  }
+  function checkTray() {
+    desk.api.permissions.state("menu-bar").then(function (st) {
+      if (st === "granted") { turnTrayOn().catch(function () {}); }
+      else if (st === "prompt") {
+        deskNote("Mostrar na barra de menus", function () {
+          turnTrayOn().catch(function (e) {
+            deskNote(null, null, "A barra de menus não foi liberada (" + String((e && e.message) || e).split(":")[0] + ").");
+          });
+        });
+      } else if (st === "denied") {
+        deskNote("Permitir a barra de menus", function () {
+          desk.api.permissions.manage().then(checkTray).catch(function () {});
+        }, "A barra de menus está desligada para este app.");
+      } else { deskNote(null); }
+    }).catch(function () {});
+  }
+  function updateDesktop() {
+    if (!desk.api) return;
+    var latest = state.days[0];
+    var sigs = latest ? signalsOf(latest.date) : [];
+    var key = (latest ? latest.date : "") + "|" + sigs.map(function (s) { return s.ticker + ":" + (s.ai_failed ? "x" : s.verdict); }).join(",");
+    if (key === desk.key) return;
+    desk.key = key;
+    desk.api.app.dock.setBadge(sigs.length ? String(sigs.length) : "").catch(function () {});
+    if (desk.trayOn) desk.api.tray.set(trayOptions()).catch(function () {});
+  }
+  function setupDesktop() {
+    window.claude.use("desktop").then(function (d) {
+      if (d && d.tray && d.app) {
+        desk.api = d;
+        d.app.dock.setIcon(drawAppIcon()).catch(function () {});
+        desk.key = null;
+        updateDesktop();
+        checkTray();
+        return;
+      }
+      if (d && d.install) {
+        d.install.state().then(function (st) {
+          if (st === "available") {
+            deskNote("Instalar como app no Mac", function () {
+              d.install.request().then(function (r) {
+                if (r === "installed") deskNote(null, null, "Instalando… o app abre numa janela própria.");
+              }).catch(function () {});
+            });
+          }
+        }).catch(function () {});
+      }
+    }).catch(function () {});
+  }
+
+  function render() { renderStatus(); renderToday(); renderHistory(); renderStats(); updateDesktop(); }
 
   var timer = setTimeout(function () {
     if (!state.loaded) document.getElementById("status").textContent = "Não foi possível carregar os dados agora. Tente abrir de novo em instantes.";
@@ -380,6 +498,7 @@ footer { font-size: 12px; color: var(--muted); max-width: 65ch; }
   }
 
   if (!window.claude || !window.claude.use) { fail({ code: "fora do Claude" }); return; }
+  setupDesktop();
   window.claude.use("db").then(function (db) {
     if (!db) { fail({ code: "indisponível" }); return; }
     db.collection("days").orderBy("date", "desc").limit(15).onSnapshot(function (snap) {

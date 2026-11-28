@@ -48,7 +48,8 @@ python -m radar.scanner scan --journal $W/journal.json --out $W/day.json
 ```
 
 - Código de saída 1 (sem dados de mercado): tente mais uma vez em 2 minutos. Se falhar de novo, pule para o passo 6 e registre a falha.
-- Leia `$W/day.json`: `date`, `market_text`, `signals` (cada um com `record`, `metrics`, `earnings_text`, `tech_notes`, `levels`), `stats`.
+- Leia `$W/day.json`: `date`, `market_text`, `signals` (cada um com `record`, `metrics`, `earnings_text`, `tech_notes`, `levels`), `confirmations`, `watching`, `stats`.
+- `confirmations`: sinais "aguardar" de pregões anteriores que **confirmaram a entrada** no fechamento de `date` (fecharam acima de `level`). A entrada seria na abertura de hoje, com o `stop` e o `target` do sinal (`levels`). `watching`: os que seguem em observação (`left` = sessões restantes). Isso é calculado pelo código; não mude os números.
 - Se `date` já estiver em `$W/db/days/` (feriado nos EUA, como o dia seguinte a Thanksgiving, ou execução repetida), não analise sinais: vá direto ao passo 5 com `{"signals": {}}` (só os resultados serão atualizados).
 
 ## 3. Analisar cada sinal
@@ -56,6 +57,8 @@ python -m radar.scanner scan --journal $W/journal.json --out $W/day.json
 Para cada sinal (no máximo 8), use WebSearch para descobrir **por que a ação caiu** no pregão `date`, com 2 ou 3 buscas por ação, por exemplo `"<Empresa> stock falls <mês dia>"`, `"<TICKER> shares drop reason"` e, se houver resultados recentes (`earnings_text`), `"<Empresa> earnings guidance"`. Prefira fontes primárias e agências (Reuters, Bloomberg, CNBC, WSJ, Barron's, MarketWatch, comunicados da empresa). Abra a matéria principal quando o título não bastar.
 
 Depois, **o que mudou desde o fechamento**: 1 busca por ação sobre a noite e a manhã de hoje (`"<TICKER> premarket"`, `"<Empresa> news today"`): notícias depois do fechamento, rebaixamentos ou elevações de analistas, comentários da empresa e o movimento no pré-mercado, se alguma fonte informar. Registre em `morning_note`; se nada mudou, diga isso. Uma notícia nova pode mudar a causa ou o veredito: use a informação mais recente.
+
+Para cada item de `confirmations`, 1 busca sobre a noite e a manhã (`"<TICKER> premarket"`, `"<Empresa> news today"`). Escreva em `confirm_notes` uma frase: o que mudou desde o fechamento e se a confirmação continua de pé. Uma notícia nova e negativa (rebaixamento forte, investigação, guidance) não apaga a confirmação calculada, mas você deve dizer claramente "confirmou, mas atenção: ...".
 
 Para o mercado, 1 busca sobre a manhã (`"stock futures today"`, agenda macro do dia: dados de inflação, emprego, decisão de juros, resultados importantes antes da abertura) para o resumo do dia.
 
@@ -70,7 +73,7 @@ Use `abn_1d` (queda ajustada ao beta em relação ao ETF do setor): perto de 0 s
 Veredito:
 
 - **entrar**: causa pontual com convicção, sem resultados marcados dentro da janela do trade (`next_earnings`), e sinal técnico de estabilização (fechamento na metade de cima do dia, volume não extremo). Diga exatamente onde entrar dentro da faixa calculada.
-- **aguardar_estabilizacao**: causa pontual ou incerta, mas sem estabilização ainda. O `trigger_to_enter` precisa ser **objetivo e verificável no pregão de hoje ou nos próximos** (ex.: "fechamento acima de 212,40, a máxima de hoje", "não renovar a mínima de 386 por 2 pregões"). Nada de "esperar o mercado acalmar".
+- **aguardar_estabilizacao**: causa pontual ou incerta, mas sem estabilização ainda. Defina `confirm_above`: o **preço de fechamento** que confirma a entrada. O padrão testado é o **fechamento anterior à queda** (`metrics.prev_close`): no backtest de 15 anos, esperar esse nível foi melhor que entrar direto nos dois períodos. Use outro nível só com motivo claro (ex.: a queda foi de vários dias e o fechamento anterior fica longe demais) e diga o motivo no `trigger_to_enter`. Tem de ser um número acima do fechamento do sinal. O código acompanha o sinal por 5 pregões: confirma no primeiro fechamento acima desse nível, invalida se fechar abaixo do stop. Sem `confirm_above`, o nível é o fechamento anterior à queda. O `trigger_to_enter` explica o mesmo nível em texto (ex.: "fechamento acima de 313,55, o fechamento de 23/11"). Nada de "esperar o mercado acalmar".
 - **evitar**: causa estrutural, ou resultados dentro da janela, ou queda ainda em aceleração com notícia forte.
 
 Seja cético. Não invente notícias, números ou citações. Se não encontrar a causa, diga isso e use `incerto`. Considere o placar em `stats` (por exemplo, se "Aguardar" está indo melhor que "Entrar", ou se o regime de correção está derrubando os sinais) e mencione no resumo do dia quando for relevante.
@@ -80,6 +83,7 @@ Escreva `$W/analysis.json`:
 ```json
 {
   "ai_model": "claude",
+  "confirm_notes": {"TICKER": "só para os itens de confirmations: o que mudou desde o fechamento"},
   "summary": "2 a 4 frases: tom do pregão anterior (SPY/QQQ, regime), o que puxou as quedas, o sinal mais interessante e o que vigiar hoje (futuros, agenda macro, pré-mercado dos sinais).",
   "signals": {
     "TICKER": {
@@ -91,6 +95,7 @@ Escreva `$W/analysis.json`:
       "risks": ["o que pode dar errado no trade"],
       "verdict": "entrar | aguardar_estabilizacao | evitar",
       "trigger_to_enter": "condição objetiva para entrar",
+      "confirm_above": 313.55,
       "comment_on_levels": "comentário curto sobre entrada, stop e alvo calculados",
       "morning_note": "o que mudou desde o fechamento: notícias da noite, analistas, pré-mercado (ou 'nada relevante desde o fechamento')",
       "news": [{"title": "...", "url": "https://...", "source": "Reuters", "date": "2026-11-24"}]
@@ -99,7 +104,7 @@ Escreva `$W/analysis.json`:
 }
 ```
 
-`confidence` é um número de 0 a 100. `news` tem de 2 a 5 itens que você realmente usou, só com URLs `https://`. Se não conseguir analisar um sinal (busca falhou), use `{"ai_failed": true, "cause_summary": "motivo"}` em vez de chutar.
+`confidence` é um número de 0 a 100. `confirm_above` só para o veredito `aguardar_estabilizacao` (número, sem aspas). `news` tem de 2 a 5 itens que você realmente usou, só com URLs `https://`. Se não conseguir analisar um sinal (busca falhou), use `{"ai_failed": true, "cause_summary": "motivo"}` em vez de chutar.
 
 Sem sinais no dia: `"signals": {}` e um `summary` curto sobre o pregão anterior e o que vigiar hoje.
 
@@ -128,10 +133,13 @@ A última mensagem vira a notificação no celular. Escreva só isto (sem tabela
 
 ```
 📉 Radar · pregão de <dd/mm> · <N> sinal(is)
+🟢 <TICKER> confirmou: fechou <close> acima de <level> → entrada na abertura de hoje · stop <stop> · alvo <target>
 <TICKER> <queda>: <causa em poucas palavras> → <veredito> (<pré-mercado, se souber>)
 ...
 Hoje: <1 frase com o que vigiar no pregão de hoje>
 Página: https://claude.ai/artifact/BxBAauzTjPdS83K8MVVqVe
 ```
 
-Sem sinais: `📉 Radar · pregão de <dd/mm> · sem quedas relevantes`, mais a frase de hoje e o link. Pregão já registrado (feriado nos EUA): diga que não houve pregão novo e dê o link.
+As linhas 🟢 vêm primeiro, uma por confirmação (acrescente "mas atenção: ..." se a nota pedir). Sem confirmações, omita essas linhas.
+
+Sem sinais: `📉 Radar · pregão de <dd/mm> · sem quedas relevantes` (com as linhas 🟢, se houver), mais a frase de hoje e o link. Pregão já registrado (feriado nos EUA): diga que não houve pregão novo e dê o link.

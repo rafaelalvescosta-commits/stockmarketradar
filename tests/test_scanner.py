@@ -344,6 +344,7 @@ def test_scan_writes_json_for_analysis(tmp_path, monkeypatch):
     assert day["journal"][0]["outcomes"]["basis"] == "next_open"
     assert day["stats"]["todos"]["n"] == 1 and day["stats"]["veredito"]["entrar"]["n"] == 1
     assert {w["ticker"] for w in day["watch"]} == {"AAA", "BBB"}
+    assert day["confirmations"] == [] and day["watching"] == []
 
 
 def test_scan_without_journal_and_earnings(tmp_path, monkeypatch):
@@ -376,3 +377,71 @@ def test_stats_command(tmp_path, capsys):
     assert st["todos"]["n"] == 2 and st["veredito"]["entrar"]["win_5d"] == 100
     assert st["causa"]["incerto"]["n"] == 0
     assert st["analista"]["gemini"]["n"] == 1 and st["analista"]["claude"]["n"] == 0
+
+
+# --------------------------------------------------------------------------
+# Acompanhamento dos sinais "aguardar"
+# --------------------------------------------------------------------------
+
+LV = {"stop": 90.0, "target": 115.0}
+
+
+def test_follow_confirms_on_close_above_previous_close_and_enters_next_open():
+    # D-1 fecha 102,5; D sinal fecha 98; D+1 fecha 101 (não confirma); D+2 fecha 103 (confirma); D+3 abre 104
+    df = _ohlc([(105, 106, 99, 102.5), (100, 102, 97, 98), (98, 101.5, 97, 101), (101, 104, 100, 103),
+                (104, 105, 103, 104), (104, 116, 103, 110)])
+    f = ds.follow_up(df, "2026-10-02", LV)
+    assert f["status"] == "confirmado" and f["level"] == 102.5 and f["rule"] == "fechamento anterior"
+    assert f["date"] == "2026-10-06" and f["sessions"] == 2 and f["close"] == 103.0
+    assert f["entry_open"] == 104.0 and f["entry_date"] == "2026-10-07"
+    assert f["exit"] == "alvo" and f["exit_ret"] == pytest.approx((115 / 104 - 1) * 100, abs=0.01)
+
+
+def test_follow_manual_level_invalidation_and_expiry():
+    df = _ohlc([(100, 102, 97, 98), (98, 99, 96, 97), (97, 98, 88, 89), (89, 99, 88, 98)])
+    # fecha abaixo do stop antes de confirmar
+    f = ds.follow_up(df, "2026-10-01", LV, confirm_above=105)
+    assert f["status"] == "invalidado" and f["date"] == "2026-10-05" and f["rule"] == "manual"  # 3ª sessão: seg 05/10
+    # sem confirmar nem invalidar dentro da janela
+    flat = _ohlc([(100, 102, 97, 100), (100, 102, 97, 98)] + [(98, 99, 97, 98)] * 6)
+    assert ds.follow_up(flat, "2026-10-02", LV)["status"] == "expirado"
+    # ainda dentro da janela
+    f = ds.follow_up(flat.iloc[:4], "2026-10-02", LV)
+    assert f["status"] == "aguardando" and f["sessions"] == 2 and f["left"] == 3
+    assert ds.follow_up(flat, "2026-09-01", LV) is None
+
+
+def test_follow_journal_only_for_wait_verdicts_and_stats():
+    df = _ohlc([(100, 102, 97, 101), (100, 102, 97, 98), (98, 101, 97, 99), (99, 104, 98, 103),
+                (104, 105, 103, 104)] + [(104, 105, 103, 104)] * 12)
+    journal = [
+        {"date": "2026-10-02", "ticker": "AAA", "verdict": "aguardar_estabilizacao", "levels": LV},
+        {"date": "2026-10-02", "ticker": "BBB", "verdict": "entrar", "levels": LV},
+        {"date": "2026-10-02", "ticker": "CCC", "verdict": "aguardar_estabilizacao", "ai_failed": True, "levels": LV},
+    ]
+    ds.follow_journal(journal, {"AAA": df, "BBB": df, "CCC": df})
+    assert journal[0]["outcomes"]["follow"]["status"] == "confirmado"
+    assert "outcomes" not in journal[1] and "outcomes" not in journal[2]
+    st = ds.journal_stats(journal)
+    assert st["confirmacao"]["confirmados"]["n"] == 1
+    assert st["confirmacao"]["confirmados"]["avg_trade"] is not None
+
+
+def test_scan_lists_confirmations_of_the_session(tmp_path, monkeypatch):
+    bbb = _frame(seed=3)
+    c0 = float(bbb["Close"].iloc[-2])
+    bbb.iloc[-1, bbb.columns.get_loc("Close")] = c0 * 1.05
+    bbb.iloc[-1, bbb.columns.get_loc("High")] = c0 * 1.06
+    frames = _bench_frames({"BBB": bbb, "SPY": _frame(seed=1)})
+    monkeypatch.setattr(ds, "fetch_history", lambda tickers, period="1y": frames)
+    sig_date = str(bbb.index[-2].date())
+    j = tmp_path / "j.json"
+    j.write_text(json.dumps([{"date": sig_date, "ticker": "BBB", "verdict": "aguardar_estabilizacao",
+                              "confirm_above": round(c0 * 1.02, 2),
+                              "levels": {"stop": c0 * 0.8, "target": c0 * 1.5}}]))
+    out = tmp_path / "day.json"
+    assert ds.run(ds.DipScanConfig(universe={"BBB": ("Beta", "QQQ")}), out, j, earnings=False) == 0
+    day = json.loads(out.read_text())
+    (c,) = day["confirmations"]
+    assert c["ticker"] == "BBB" and c["signal_date"] == sig_date and c["date"] == day["date"]
+    assert c["status"] == "confirmado" and c["rule"] == "manual" and "entry_open" not in c

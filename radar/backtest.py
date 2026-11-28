@@ -18,6 +18,7 @@ Limitações que o relatório repete:
 Uso:
     python -m radar.backtest --period 15y --universe extended --split 2022-01-01
     python -m radar.backtest --stop-buffers 0.5,1,1.5 --csv sinais.csv
+    python -m radar.backtest --period 15y --universe extended --split 2022-01-01 --follow
 """
 
 from __future__ import annotations
@@ -169,6 +170,66 @@ def run_backtest(
     return records
 
 
+FOLLOW_RULES = ("high", "prev_close")
+
+
+def add_follow(records: List[Dict[str, Any]], histories: Dict[str, Any]) -> None:
+    """
+    Simula o acompanhamento ("aguardar" até confirmar) em todos os sinais, com dois níveis
+    de confirmação: a máxima do dia do sinal ("high") e o fechamento anterior à queda
+    ("prev_close", recuperar a queda do dia; o padrão do scanner).
+    """
+    for rec in records:
+        df = histories.get(rec["ticker"])
+        if df is None:
+            continue
+        idx = [str(d.date()) for d in df.index]
+        if rec["date"] not in idx:
+            continue
+        i0 = idx.index(rec["date"])
+        levels = {"high": float(df["High"].iloc[i0]), "prev_close": float(df["Close"].iloc[i0 - 1]) if i0 else None}
+        for rule in FOLLOW_RULES:
+            if rule == "prev_close" and levels[rule] is None:
+                continue
+            f = ds.follow_up(df, rec["date"], rec.get("levels") or {}, levels[rule])
+            rec[f"f_{rule}_status"] = (f or {}).get("status")
+            rec[f"f_{rule}_trade"] = (f or {}).get("exit_ret")
+
+
+def follow_report(df, cost_pct: float, split: Optional[str]) -> str:
+    """Entrar direto x esperar a confirmação, nos mesmos sinais."""
+    import pandas as pd
+
+    periods = [("todos", df)]
+    if split:
+        periods += [(f"< {split}", df[df["date"] < split]), (f">= {split}", df[df["date"] >= split])]
+    rows = {}
+    for label, g in periods:
+        for rule in FOLLOW_RULES:
+            st = g.get(f"f_{rule}_status")
+            if st is None:
+                continue
+            conf = g[st == "confirmado"]
+            other = g[st.isin(["expirado", "invalidado"])]
+            direct = g["exit_ret"].dropna()
+            tr = conf[f"f_{rule}_trade"].dropna()
+            rows[f"{label} | {rule}"] = {
+                "n": len(g),
+                "% confirma": 100 * len(conf) / len(g) if len(g) else None,
+                "direto (todos)": direct.mean() - cost_pct if len(direct) else None,
+                "direto (os que confirmam)": conf["exit_ret"].dropna().mean() - cost_pct if len(conf) else None,
+                "confirmado": tr.mean() - cost_pct if len(tr) else None,
+                "±EP conf.": tr.std() / math.sqrt(len(tr)) if len(tr) > 1 else None,
+                "% pos conf.": 100 * (tr > 0).mean() if len(tr) else None,
+                "direto (os que não confirmam)": other["exit_ret"].dropna().mean() - cost_pct if len(other) else None,
+            }
+    t = pd.DataFrame(rows).T
+    return ("== Acompanhamento: entrar direto x esperar confirmação (trade líquido, %) ==\n"
+            "high = fechar acima da máxima do dia do sinal; prev_close = fechar acima do fechamento anterior à queda;\n"
+            f"até {ds.FOLLOW_SESSIONS} sessões; fechar abaixo do stop invalida.\n"
+            + t.to_string(float_format=lambda v: f"{v:,.2f}"))
+
+
 def baseline_returns(histories: Dict[str, Any], tickers: Sequence[str]):
     """Retorno a 5 sessões desde a abertura seguinte, em qualquer dia, para as mesmas ações."""
     import pandas as pd
@@ -304,6 +365,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--stop-buffers", default="0.5,1,1.5", help="margens do stop a comparar, em ATR")
     parser.add_argument("--cost-pct", type=float, default=0.1, help="custo por trade (ida e volta), em %%")
     parser.add_argument("--csv", help="grava os sinais num CSV")
+    parser.add_argument("--follow", action="store_true", help="compara entrar direto com esperar a confirmação")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
@@ -321,8 +383,12 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     histories = ds.fetch_history(sorted(set(cfg.universe) | set(cfg.benchmarks)), period=args.period)
     records = run_backtest(histories, cfg, stop_buffers)
+    if args.follow:
+        add_follow(records, histories)
     df = to_frame(records)
     print(report(df, baseline_returns(histories, list(cfg.universe)), args.cost_pct, args.split, stop_buffers))
+    if args.follow:
+        print("\n" + follow_report(df, args.cost_pct, args.split))
     if args.csv:
         df.to_csv(args.csv, index=False)
         print(f"\nSinais gravados em {args.csv}")

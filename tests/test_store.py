@@ -104,3 +104,31 @@ def test_cli_prepare_writes_plan(tmp_path, capsys):
     assert rc == 0
     batches = json.loads((tmp_path / "out" / "writes.json").read_text())
     assert len(batches) == 1 and len(batches[0]) == 3
+
+
+def test_confirm_above_validation_and_finality(tmp_path):
+    db = store.load_db(_db(tmp_path))
+    ok = dict(GOOD, confirm_above=420.5)
+    res = store.prepare(_day(), {"signals": {"AMD": ok}}, db, tmp_path / "o1")
+    assert res["errors"] == []
+    sig = json.loads(open(res["writes"][0]["file_path"]).read())
+    assert sig["confirm_above"] == 420.5
+    res = store.prepare(_day(), {"signals": {"AMD": dict(GOOD, confirm_above=390)}}, db, tmp_path / "o2")
+    assert any("acima do fechamento" in e for e in res["errors"])
+    done = {"ret_10d": 1, "exit": "tempo"}
+    assert store.is_final(done)
+    assert not store.is_final({**done, "follow": {"status": "aguardando"}})
+    assert not store.is_final({**done, "follow": {"status": "confirmado"}})
+    assert store.is_final({**done, "follow": {"status": "confirmado", "exit": "alvo"}})
+    assert store.is_final({**done, "follow": {"status": "expirado"}})
+
+
+def test_day_doc_keeps_confirmations_with_notes(tmp_path):
+    day = _day()
+    day["confirmations"] = [{"ticker": "AVGO", "signal_date": "2026-11-24", "level": 313.55, "close": 315.2,
+                             "rule": "manual", "status": "confirmado", "date": "2026-11-25"}]
+    res = store.prepare(day, {"signals": {"AMD": GOOD}, "confirm_notes": {"AVGO": "Sem notícia nova."}},
+                        store.load_db(_db(tmp_path)), tmp_path / "o")
+    d = json.loads(open(next(w["file_path"] for w in res["writes"] if w["collection"] == "days")).read())
+    assert d["confirmations"] == [{"ticker": "AVGO", "signal_date": "2026-11-24", "level": 313.55,
+                                   "close": 315.2, "rule": "manual", "note": "Sem notícia nova."}]

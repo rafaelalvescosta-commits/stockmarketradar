@@ -27,6 +27,25 @@ Escaneia um universo fechado de ações americanas à procura de **quedas fortes
 10. **Análise do Claude** (rotina diária, ver abaixo): pesquisa as notícias de cada sinal, classifica a causa como `pontual`, `estrutural` ou `incerto`, dá um veredito (`entrar`, `aguardar_estabilizacao` ou `evitar`) com gatilho de entrada objetivo, catalisadores e riscos, e escreve o resumo do pregão.
 11. **Registro e página**: tudo é gravado no banco do artefato "Radar do Pregão", que mostra o último pregão, os últimos 15 pregões e o placar.
 
+## Acompanhamento dos sinais "aguardar"
+
+Um sinal com veredito `aguardar_estabilizacao` fica em observação por 5 pregões (`FOLLOW_SESSIONS`), com regra decidida pelo código (`follow_up`):
+
+- **confirma** no primeiro fechamento acima de `confirm_above`, o nível que a análise define. O padrão, e o que a análise usa salvo motivo claro, é o fechamento anterior à queda (recuperar a queda do dia);
+- **invalida** se fechar abaixo do stop antes de confirmar;
+- **expira** se nada disso acontecer em 5 pregões.
+
+A entrada confirmada é a abertura seguinte à confirmação, com o stop e o alvo do sinal, e o resultado é simulado como os demais (`outcomes.follow`: `status`, `level`, `date`, `close`, `entry_open`, `ret_5d`, `exit`, `exit_ret`). A rotina da manhã avisa as confirmações do pregão anterior (🟢 na notificação e no topo da página), com uma checagem das notícias desde o fechamento. O placar compara a entrada confirmada com o que teria acontecido entrando direto nos que não confirmaram.
+
+No backtest, `--follow` compara entrar direto com esperar a confirmação, em todos os sinais, com dois níveis: a máxima do dia do sinal e o fechamento anterior à queda. Resultado com `--period 15y --universe extended --split 2022-01-01` (trade líquido de 0,1% de custo, por trade):
+
+| Período | Entrar direto | Confirmar na máxima do dia | Confirmar no fechamento anterior | % que confirma (fech. anterior) |
+| --- | --- | --- | --- | --- |
+| 2011–2021 (1.691 sinais) | +0,46% | +0,28% | +1,19% | 25% |
+| 2022–2026 (2.291 sinais) | −0,16% | −0,20% | −0,07% | 28% |
+
+Só o fechamento anterior melhora nos dois períodos, por isso é o padrão. A diferença por trade está dentro do erro-padrão (±0,4 a 0,5 ponto); o ganho mais claro é a seletividade: os sinais que não confirmam teriam dado em média −1,5% (até 2021) e −2,4% (desde 2022) entrando direto.
+
 ## Registro de sinais
 
 Cada sinal salva as métricas do dia (`abn_1d`, `beta`, `gap_pct`, `intensity`, `market_day`, `earnings_reaction`, `next_earnings`), os níveis, a análise (`cause_type`, `verdict`, `cause_summary`, `news`...) e quem analisou (`ai_model`: `claude`, ou ausente nos sinais antigos do Gemini). Em cada execução, `outcomes` é preenchido com:
@@ -40,6 +59,7 @@ Cada sinal salva as métricas do dia (`abn_1d`, `beta`, `gap_pct`, `intensity`, 
 | `excess_3d` / `excess_5d` / `excess_10d` | O mesmo retorno menos o do SPY no mesmo período |
 | `exit` | `alvo`, `stop`, `ambos` (os dois no mesmo dia; conta como stop), `tempo` (10 sessões) ou `sem_entrada` (a abertura de entrada já estava abaixo do stop ou acima do alvo) |
 | `exit_ret` | Retorno simulado do trade; um gap através do stop ou do alvo sai na abertura |
+| `follow` | Só nos sinais "aguardar": acompanhamento da confirmação (ver acima) |
 
 Registros criados por versões anteriores (medidos a partir do fechamento) são recalculados automaticamente enquanto o pregão do sinal estiver no histórico de 1 ano.
 
@@ -98,8 +118,8 @@ Badge e barra de menus se atualizam enquanto o app está aberto. A notificação
 | Documento | Conteúdo | Escrita |
 | --- | --- | --- |
 | `signals/<data>_<TICKER>` | Métricas, níveis e análise do sinal | Criado uma vez |
-| `days/<data>` | Mercado do dia e resumo | Criado uma vez |
-| `outcomes/<data>_<TICKER>` | Resultado final (10 sessões e saída definidas) | Criado quando o sinal fecha |
+| `days/<data>` | Mercado do dia, resumo e confirmações do pregão | Criado uma vez |
+| `outcomes/<data>_<TICKER>` | Resultado final (10 sessões e saída definidas; acompanhamento resolvido) | Criado quando o sinal fecha |
 | `meta/state` | Resultados em aberto, estatísticas e status da última execução | Reescrito a cada execução (com versão) |
 
 ## Execução local

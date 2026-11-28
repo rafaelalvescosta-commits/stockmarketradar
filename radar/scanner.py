@@ -11,6 +11,8 @@ Fluxo:
        datas de resultados, pontuação técnica e níveis (entrada, stop, alvo) pelo ATR.
     4. Resultado dos sinais anteriores (3/5/10 sessões a partir da abertura seguinte,
        também em relação ao SPY) e estatísticas por causa, veredito e regime.
+       Sinais "aguardar" são acompanhados por FOLLOW_SESSIONS sessões: a entrada se
+       confirma num fechamento acima do nível definido (`follow_up`).
     5. Tudo vai para um JSON. Notícias, classificação da causa e veredito ficam com a
        análise diária do Claude (.claude/skills/radar-diario/SKILL.md).
 
@@ -105,6 +107,7 @@ DEFAULT_ANALYST = "gemini"   # registros sem ai_model vêm da versão antiga
 OUTCOME_HORIZONS = (3, 5, 10)
 OUTCOME_BASIS = "next_open"   # retornos medidos a partir da abertura da sessão seguinte
 MAX_HOLD_SESSIONS = 10
+FOLLOW_SESSIONS = 5           # sessões para um sinal "aguardar" confirmar a entrada
 BETA_WINDOW = 120             # sessões usadas no beta (exclui o dia do sinal)
 BETA_MIN_OBS = 60
 BETA_BOUNDS = (0.0, 4.0)
@@ -542,6 +545,67 @@ def simulate_exit(after, entry: float, stop: float, target: float) -> Optional[T
     return None
 
 
+def follow_up(df, signal_date: str, levels: Dict[str, Any], confirm_above: Optional[float] = None,
+              max_sessions: int = FOLLOW_SESSIONS) -> Optional[Dict[str, Any]]:
+    """
+    Acompanhamento de um sinal "aguardar": nas `max_sessions` sessões seguintes ao sinal,
+    a entrada se confirma no primeiro fechamento acima de `confirm_above` (padrão: o
+    fechamento anterior à queda, ou seja, recuperar a queda do dia; no backtest de 15 anos foi
+    melhor que entrar direto nos dois períodos, e a máxima do dia não). Fechar abaixo do stop
+    antes disso invalida o setup. A entrada
+    confirmada é a abertura seguinte à confirmação, com o stop e o alvo do sinal.
+
+    status: "aguardando" | "confirmado" | "invalidado" | "expirado".
+    """
+    idx = [str(d.date()) for d in df.index]
+    if signal_date not in idx:
+        return None
+    i0 = idx.index(signal_date)
+    if confirm_above:
+        level = _safe(confirm_above)
+    elif i0 > 0:
+        level = _safe(float(df["Close"].iloc[i0 - 1]))
+    else:
+        return None
+    stop, target = levels.get("stop"), levels.get("target")
+    after = df.iloc[i0 + 1:]
+    base: Dict[str, Any] = {"level": level, "rule": "manual" if confirm_above else "fechamento anterior"}
+    for k in range(min(max_sessions, len(after))):
+        c, day = float(after["Close"].iloc[k]), idx[i0 + 1 + k]
+        if stop and c < stop:
+            return {**base, "status": "invalidado", "date": day, "sessions": k + 1, "close": _safe(c)}
+        if level and c > level:
+            res = {**base, "status": "confirmado", "date": day, "sessions": k + 1, "close": _safe(c)}
+            trade = after.iloc[k + 1:]
+            if len(trade):
+                entry = float(trade["Open"].iloc[0])
+                res["entry_open"] = _safe(entry)
+                res["entry_date"] = str(trade.index[0].date())
+                if len(trade) >= 5:
+                    res["ret_5d"] = _safe((float(trade["Close"].iloc[4]) / entry - 1) * 100)
+                if stop and target:
+                    ex = simulate_exit(trade, entry, stop, target)
+                    if ex:
+                        res["exit"], res["exit_ret"] = ex
+            return res
+    if len(after) >= max_sessions:
+        return {**base, "status": "expirado", "sessions": max_sessions}
+    return {**base, "status": "aguardando", "sessions": len(after), "left": max_sessions - len(after)}
+
+
+def follow_journal(journal: List[Dict[str, Any]], histories: Dict[str, Any]) -> None:
+    """Atualiza outcomes["follow"] dos sinais com veredito "aguardar_estabilizacao"."""
+    for rec in journal:
+        if rec.get("verdict") != "aguardar_estabilizacao" or rec.get("ai_failed"):
+            continue
+        df = histories.get(rec["ticker"])
+        if df is None:
+            continue
+        f = follow_up(df, rec["date"], rec.get("levels") or {}, rec.get("confirm_above"))
+        if f:
+            rec.setdefault("outcomes", {})["follow"] = f
+
+
 def update_outcomes(journal: List[Dict[str, Any]], histories: Dict[str, Any]) -> None:
     """
     Preenche, a partir da abertura da sessão seguinte ao sinal: retorno a N sessões,
@@ -604,6 +668,15 @@ def _group_stats(recs: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _follow(r: Dict[str, Any]) -> Dict[str, Any]:
+    return (r.get("outcomes") or {}).get("follow") or {}
+
+
+def _follow_stats(recs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Como _group_stats, mas medindo a entrada confirmada (abertura depois da confirmação)."""
+    return _group_stats([{"outcomes": {k: _follow(r).get(k) for k in ("ret_5d", "exit", "exit_ret")}} for r in recs])
+
+
 def journal_stats(journal: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Estatísticas globais, por causa, por veredito, por regime de mercado e por analista (IA).
@@ -617,6 +690,10 @@ def journal_stats(journal: List[Dict[str, Any]]) -> Dict[str, Any]:
         "regime": {
             k: _group_stats([r for r in journal if r.get("spy_d200") is not None and (r["spy_d200"] <= 0) == (k == "correcao")])
             for k in REGIME_LABELS
+        },
+        "confirmacao": {
+            "confirmados": _follow_stats([r for r in ai_ok if _follow(r).get("status") == "confirmado"]),
+            "nao_confirmados": _group_stats([r for r in ai_ok if _follow(r).get("status") in ("expirado", "invalidado")]),
         },
         "analista": {
             k: _group_stats([r for r in ai_ok if (r.get("ai_model") or DEFAULT_ANALYST) == k])
@@ -754,6 +831,8 @@ def run(cfg: DipScanConfig, out_path: Path, journal_path: Optional[Path] = None,
         s["record"] = journal_record(s, market)
 
     update_outcomes(journal, histories)
+    follow_journal(journal, histories)
+    follows = [(r, (r.get("outcomes") or {}).get("follow") or {}) for r in journal]
     out = {
         "date": run_date,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -762,6 +841,12 @@ def run(cfg: DipScanConfig, out_path: Path, journal_path: Optional[Path] = None,
         "signals": signals,
         "watch": watch,
         "skipped": skipped,
+        # sinais "aguardar" que confirmaram a entrada no fechamento deste pregão
+        "confirmations": [{"ticker": r["ticker"], "signal_date": r["date"], "levels": r.get("levels"), **f}
+                          for r, f in follows if f.get("status") == "confirmado" and f.get("date") == run_date],
+        # sinais "aguardar" que seguem em observação
+        "watching": [{"ticker": r["ticker"], "signal_date": r["date"], "levels": r.get("levels"), **f}
+                     for r, f in follows if f.get("status") == "aguardando"],
         "journal": journal,
         "stats": journal_stats(journal),
     }

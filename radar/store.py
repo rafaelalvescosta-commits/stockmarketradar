@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional
 from radar.scanner import CAUSE_LABELS, VERDICT_LABELS, journal_stats
 
 AI_FIELDS = ("cause_type", "confidence", "cause_summary", "why_classification", "catalysts", "risks",
-             "verdict", "trigger_to_enter", "comment_on_levels", "morning_note", "news")
+             "verdict", "trigger_to_enter", "confirm_above", "comment_on_levels", "morning_note", "news")
 STATE_ID = "state"
 BATCH_MAX = 50
 
@@ -40,7 +40,15 @@ def doc_id(rec: Dict[str, Any]) -> str:
 
 
 def is_final(outcomes: Optional[Dict[str, Any]]) -> bool:
-    return bool(outcomes) and outcomes.get("exit") is not None and "ret_10d" in outcomes
+    """Fechado: 10 sessões e saída definidas e, se houver acompanhamento, ele também resolvido."""
+    if not outcomes or outcomes.get("exit") is None or "ret_10d" not in outcomes:
+        return False
+    f = outcomes.get("follow")
+    if not f:
+        return True
+    if f.get("status") in ("expirado", "invalidado"):
+        return True
+    return f.get("status") == "confirmado" and f.get("exit") is not None
 
 
 def _read_dir(path: Path) -> Dict[str, Dict[str, Any]]:
@@ -72,7 +80,7 @@ def build_journal(db: Dict[str, Any]) -> List[Dict[str, Any]]:
     return journal
 
 
-def _validate_ai(ticker: str, ai: Dict[str, Any]) -> List[str]:
+def _validate_ai(ticker: str, ai: Dict[str, Any], close: Optional[float] = None) -> List[str]:
     errs = []
     if ai.get("ai_failed"):
         return errs
@@ -82,6 +90,11 @@ def _validate_ai(ticker: str, ai: Dict[str, Any]) -> List[str]:
         errs.append(f"{ticker}: verdict inválido {ai.get('verdict')!r}")
     if not ai.get("cause_summary"):
         errs.append(f"{ticker}: falta cause_summary")
+    ca = ai.get("confirm_above")
+    if ca is not None and not isinstance(ca, (int, float)):
+        errs.append(f"{ticker}: confirm_above precisa ser um número")
+    elif ca is not None and close is not None and ca <= close:
+        errs.append(f"{ticker}: confirm_above ({ca}) precisa ficar acima do fechamento ({close})")
     for n in ai.get("news") or []:
         if not str(n.get("url", "")).startswith("https://"):
             errs.append(f"{ticker}: notícia sem URL https ({n.get('title')!r})")
@@ -116,7 +129,7 @@ def prepare(day: Dict[str, Any], analysis: Dict[str, Any], db: Dict[str, Any],
             ai = per_ticker.get(s["ticker"])
             if ai is None:
                 ai = {"ai_failed": True, "cause_summary": "Sem análise para este sinal nesta execução."}
-            errors += _validate_ai(s["ticker"], ai)
+            errors += _validate_ai(s["ticker"], ai, (s.get("record") or {}).get("close"))
             rec = {**s["record"], "earnings_text": s.get("earnings_text")}
             rec.update({k: ai[k] for k in AI_FIELDS if k in ai})
             if ai.get("ai_failed"):
@@ -133,6 +146,11 @@ def prepare(day: Dict[str, Any], analysis: Dict[str, Any], db: Dict[str, Any],
             "market_text": day.get("market_text"),
             "summary": analysis.get("summary") or "",
             "tickers": [r["ticker"] for r in new_records],
+            "confirmations": [
+                {k: c.get(k) for k in ("ticker", "signal_date", "level", "close", "rule")}
+                | {"note": (analysis.get("confirm_notes") or {}).get(c.get("ticker"), "")}
+                for c in day.get("confirmations") or []
+            ],
             "n_signals": len(new_records),
             "analyst": analysis.get("ai_model", "claude"),
             "generated_at": now,
